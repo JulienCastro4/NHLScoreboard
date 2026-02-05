@@ -1,0 +1,10 @@
+# NHL Logo Builder Dependencies
+
+# HTTP requests for downloading NHL data and SVG logos
+requests>=2.31.0
+
+# Image processing and manipulation
+Pillow>=10.0.0
+
+# SVG to PNG rasterization
+resvg-py>=0.3.0
