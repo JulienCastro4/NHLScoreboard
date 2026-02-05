@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NHL Scoreboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      padding: 1.5rem;
+      font-size: 16px;
+    }
+    .page-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .status-wrap {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+    }
+    h1 { font-size: 1.7rem; color: #0f0; margin-bottom: 0; }
+    .block { margin-bottom: 1rem; }
+    label {
+      display: block;
+      color: #ddd;
+      font-size: 1.2rem;
+      margin-bottom: 0.6rem;
+      text-align: center;
+    }
+    .status { color: #cbd; font-size: 1.15rem; }
+    .status.sel { color: #0f0; }
+    .load { color: #fa0; }
+    .err { color: #f44; }
+    button {
+      margin-top: 0.5rem;
+      padding: 0.4rem 0.8rem;
+      font-size: 0.9rem;
+      background: #333;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover { background: #444; }
+    .btn-display {
+      margin-top: 0;
+      font-size: 0.85rem;
+      padding: 0.35rem 0.7rem;
+    }
+    .btn-preview {
+      margin-top: 0;
+      font-size: 0.85rem;
+      padding: 0.35rem 0.7rem;
+    }
+    .games-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.9rem;
+      margin-top: 0.8rem;
+    }
+    @media (max-width: 720px) {
+      body {
+        padding: 1rem;
+        font-size: 14px;
+      }
+      h1 { font-size: 1.5rem; }
+      label { font-size: 1.05rem; }
+      .status {
+        font-size: 1rem;
+        max-width: 240px;
+      }
+      .status.load::after {
+        content: "";
+        display: block;
+      }
+      .page-head {
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .status-wrap {
+        text-align: center;
+        align-items: center;
+      }
+      .block {
+        max-width: 520px;
+        margin: 0 auto 1rem;
+      }
+      .games-list {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        width: 100%;
+        justify-content: center;
+      }
+      .game-card {
+        width: 100%;
+        max-width: 480px;
+        margin: 0 auto;
+      }
+      .game-head { font-size: 0.85rem; }
+      .state-label { font-size: 0.95rem; }
+      .head-sub { font-size: 0.9rem; }
+      .team-row .name { font-size: 0.95rem; }
+      .score-cell { font-size: 1.05rem; }
+      .stats-header { font-size: 0.9rem; }
+    }
+    @media (max-width: 480px) {
+      body {
+        padding: 0.75rem;
+        font-size: 13px;
+      }
+      h1 { font-size: 1.35rem; }
+      label { font-size: 1rem; }
+      .status { font-size: 0.95rem; }
+      .game-head { font-size: 0.8rem; }
+      .state-label { font-size: 0.9rem; }
+      .head-sub { font-size: 0.85rem; }
+      .team-row img { width: 24px; height: 24px; }
+      .team-row .name { font-size: 0.9rem; }
+      .score-cell { font-size: 1rem; }
+      .stats-header { font-size: 0.85rem; }
+      .game-card { max-width: 420px; }
+    }
+    .game-card {
+      width: 100%;
+      background: #22233a;
+      border: 1px solid #3a3a55;
+      border-radius: 10px;
+      padding: 0.7rem 0.9rem;
+      --score-col: 64px;
+      --btn-col: 140px;
+      --score-gap: 3rem;
+    }
+    .game-card.selected {
+      border-color: #0f0;
+      box-shadow: 0 0 0 1px #0f0 inset;
+    }
+    .game-head {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      font-size: 0.95rem;
+      color: #a5a5c5;
+      margin-bottom: 0.6rem;
+    }
+    .head-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 18px;
+    }
+    .date-label {
+      color: #cbd;
+    }
+    .state-label {
+      color: #e6f2ff;
+      font-weight: 700;
+      font-size: 1.05rem;
+    }
+    .head-sub {
+      color: #9aa;
+      font-size: 1rem;
+    }
+    .live-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      line-height: 1;
+    }
+    .live-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #f33;
+      box-shadow: 0 0 6px rgba(255, 60, 60, 0.9);
+      animation: livePulse 1.4s ease-in-out infinite;
+    }
+    @keyframes livePulse {
+      0% { opacity: 0.2; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.1); }
+      100% { opacity: 0.2; transform: scale(0.8); }
+    }
+    .teams-grid {
+      display: grid;
+      grid-template-columns: 1fr var(--score-col) var(--btn-col);
+      grid-auto-rows: auto;
+      column-gap: var(--score-gap);
+      row-gap: 0.55rem;
+      align-items: center;
+    }
+    .team-row {
+      display: grid;
+      grid-template-columns: 50px 1fr;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .team-row img {
+      width: 50px;
+      height: 50px;
+      object-fit: contain;
+      background: #111;
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .team-row .name { font-size: 1.05rem; }
+    .team-row .abbrev { color: #9aa; font-size: 0.8rem; margin-left: 0.35rem; }
+    .score-cell {
+      text-align: center;
+      justify-self: center;
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+    .stats-header {
+      display: grid;
+      grid-template-columns: 1fr var(--score-col) var(--btn-col);
+      color: #9aa;
+      font-size: 1rem;
+      margin-bottom: 0.2rem;
+      column-gap: var(--score-gap);
+    }
+    .stat { text-align: center; justify-self: center; }
+    .stats-header .stat {
+      font-weight: 700;
+    }
+    .game-meta {
+      font-size: 0.85rem;
+      color: #9aa;
+      margin-top: 0.35rem;
+    }
+    .btn-select {
+      margin-top: 0;
+      justify-self: center;
+      padding: 0.55rem 1.2rem;
+      min-width: 110px;
+    }
+    .btn-select.selected {
+      background: #0f0;
+      color: #111;
+      border-color: #0f0;
+    }
+    .btn-select.loading {
+      opacity: 0.7;
+    }
+    .date-bar {
+      margin-top: 0.4rem;
+      margin-bottom: 0.4rem;
+      color: #cbd;
+      font-size: 1.05rem;
+    }
+    .match-body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .select-col {
+      grid-column: 3;
+      grid-row: 1 / span 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    @media (max-width: 480px) {
+      .team-row img {
+        width: 28px !important;
+        height: 28px !important;
+      }
+      .team-row {
+        grid-template-columns: 28px 1fr;
+      }
+      .game-card {
+        --score-col: 52px;
+        --btn-col: 72px;
+        --score-gap: 0.7rem;
+      }
+      .btn-select { min-width: 72px; padding: 0.4rem 0.6rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-head">
+    <h1>NHL Scoreboard</h1>
+    <div class="status-wrap">
+      <p id="status" class="status">Loading…</p>
+      <button id="display-toggle" class="btn-display" type="button">Screen: ON</button>
+      <button id="preview-goal" class="btn-preview" type="button">Preview Goal</button>
+    </div>
+  </div>
+
+  <div class="block">
+    <label>Select a game for the scoreboard</label>
+    <div id="date-bar" class="date-bar"></div>
+    <div id="games-list" class="games-list" aria-live="polite"></div>
+  </div>
+
+  <script>
+    const status = document.getElementById('status');
+    const list = document.getElementById('games-list');
+    const dateBar = document.getElementById('date-bar');
+    let gamesCache = [];
+    let selectedId = 0;
+    let lastScheduleUpdatedTs = '';
+    let displayEnabled = true;
+
+    function setStatus(msg, cls) {
+      status.textContent = msg;
+      status.className = 'status ' + (cls || '');
+    }
+
+    function logoUrl(team) {
+      if (team.logo) return team.logo;
+      if (team.abbrev) return 'https://assets.nhle.com/logos/nhl/svg/' + team.abbrev + '_light.svg';
+      return '';
+    }
+
+    function teamLabel(team) {
+      return team.name || team.commonName || team.place || team.abbrev || '?';
+    }
+
+    function formatStartTime(g) {
+      if (!g.startTimeUTC) return '?';
+      const m = String(g.startTimeUTC).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      if (!m) return '?';
+      const utcMs = Date.UTC(
+        parseInt(m[1], 10),
+        parseInt(m[2], 10) - 1,
+        parseInt(m[3], 10),
+        parseInt(m[4], 10),
+        parseInt(m[5], 10)
+      );
+      let offsetMin = 0;
+      const offsetStr = g.easternUTCOffset || g.venueUTCOffset || '';
+      if (offsetStr) {
+        const o = String(offsetStr).match(/^([+-])(\d{2}):(\d{2})$/);
+        if (o) {
+          const sign = o[1] === '-' ? -1 : 1;
+          offsetMin = sign * (parseInt(o[2], 10) * 60 + parseInt(o[3], 10));
+        }
+      }
+      const local = new Date(utcMs + offsetMin * 60000);
+      const hh = String(local.getUTCHours()).padStart(2, '0');
+      const mm = String(local.getUTCMinutes()).padStart(2, '0');
+      return hh + ':' + mm;
+    }
+
+    function renderGames() {
+      list.innerHTML = '';
+      if (!gamesCache.length) {
+        dateBar.textContent = '';
+      } else {
+        const dates = Array.from(new Set(gamesCache.map(g => g.date).filter(Boolean)));
+        if (dates.length === 1) dateBar.textContent = 'Date: ' + dates[0];
+        else dateBar.textContent = 'Dates: ' + dates[0] + ' → ' + dates[dates.length - 1] + ' (' + dates.length + ' days)';
+      }
+
+      gamesCache.forEach(g => {
+        const card = document.createElement('div');
+        card.className = 'game-card' + (selectedId === g.id ? ' selected' : '');
+        const away = g.away || {};
+        const home = g.home || {};
+        const time = formatStartTime(g);
+        const isSelected = selectedId === g.id;
+        const dateLabel = g.date ? ('<span class="date-label">' + g.date + '</span>') : '';
+        const state = String(g.gameState || '?');
+        const stateUpper = state.toUpperCase();
+        const isLive = (stateUpper === 'LIVE' || stateUpper === 'CRIT');
+        const isFinal = (stateUpper === 'OFF' || stateUpper === 'FINAL');
+        let statusLabel = state;
+        let showStartLine = true;
+        if (stateUpper === 'FUT' || stateUpper === 'PRE') {
+          statusLabel = 'Game starts at ' + time;
+          showStartLine = false;
+        } else if (isFinal) {
+          statusLabel = 'FINAL';
+          showStartLine = true;
+        } else if (isLive) {
+          statusLabel = 'LIVE';
+        }
+        const stateHtml = isLive
+          ? '<span class="live-state state-label">' + statusLabel + '<span class="live-dot" aria-hidden="true"></span></span>'
+          : '<span class="state-label">' + statusLabel + '</span>';
+        let metaLine = '';
+        if (showStartLine) {
+          const metaParts = ['Start time: ' + time];
+          if (isFinal) {
+            metaParts.push('Game ended');
+          }
+          if (isLive && g.clock) {
+            const period = Number(g.period || 0);
+            const clock = g.clock.timeRemaining || '';
+            if (g.clock.inIntermission) {
+              metaParts.push('Intermission');
+            } else {
+              if (period) metaParts.push('Period ' + period);
+              if (clock) metaParts.push(clock);
+            }
+          }
+          metaLine = '<span class="head-sub">' + metaParts.join(' • ') + '</span>';
+        }
+
+        const statsHeader = '<div class="stats-header"><span></span><span class="stat">Score</span><span></span></div>'
+        const awayStats = '<div class="score-cell">' + (away.score ?? 0) + '</div>';
+        const homeStats = '<div class="score-cell">' + (home.score ?? 0) + '</div>';
+        card.innerHTML = `
+          <div class="match-body">
+            <div class="game-head">
+              <div class="head-row">${dateLabel}${metaLine}${stateHtml}</div>
+            </div>
+            ${statsHeader}
+            <div class="teams-grid">
+              <div class="team-row">
+                <img src="${logoUrl(away)}" alt="">
+                <div class="name">${teamLabel(away)} <span class="abbrev">(${away.abbrev || '?'})</span></div>
+              </div>
+              ${awayStats}
+              <div class="select-col">
+                <button class="btn-select${isSelected ? ' selected' : ''}" type="button">${isSelected ? 'Selected' : 'Select'}</button>
+              </div>
+              <div class="team-row">
+                <img src="${logoUrl(home)}" alt="">
+                <div class="name">${teamLabel(home)} <span class="abbrev">(${home.abbrev || '?'})</span></div>
+              </div>
+              ${homeStats}
+            </div>
+          </div>
+        `;
+        const selectBtn = card.querySelector('.btn-select');
+        selectBtn.addEventListener('click', () => selectGame(g.id, selectBtn));
+        list.appendChild(card);
+      });
+    }
+
+    async function loadSchedule() {
+      const now = new Date();
+      const ts = now.toLocaleString();
+      console.log('[refresh] fetch schedule @', ts);
+      setStatus('Loading NHL games…', 'load');
+      try {
+        const r = await fetch('/api/schedule');
+        if (!r.ok) {
+          const t = await r.text();
+          let detail = '';
+          try {
+            const e = JSON.parse(t);
+            if (e.error === 'parse' && e.msg) detail = ' (parse: ' + e.msg + ')';
+            else if (e.error === 'nhl' && e.code != null) detail = ' (NHL code: ' + e.code + ')';
+            else if (e.error) detail = ' (' + e.error + ')';
+          } catch (_) {}
+          throw new Error('API ' + r.status + detail);
+        }
+        const data = await r.json();
+        const games = data.games || data;
+        if (!Array.isArray(games)) throw new Error('Unexpected format');
+
+        gamesCache = games;
+        renderGames();
+        const hasSelected = selectedId !== 0;
+        if (!hasSelected) {
+          lastScheduleUpdatedTs = ts;
+        }
+        const updatedLabel = lastScheduleUpdatedTs ? (' Updated: ' + lastScheduleUpdatedTs) : '';
+        const statusMsg = hasSelected
+          ? ('Won\'t update schedule while game selected.' + updatedLabel)
+          : ('List updated. ' + games.length + ' game(s).' + updatedLabel);
+        setStatus(statusMsg, 'sel');
+        console.log('[refresh] ok games=', games.length);
+      } catch (e) {
+        setStatus('Error: ' + e.message, 'err');
+        console.log('[refresh] error', e.message);
+      }
+    }
+
+    async function loadSelected() {
+      try {
+        const r = await fetch('/api/selected-game');
+        const d = await r.json();
+        selectedId = d.gameId || 0;
+        if (selectedId && !gamesCache.some(g => g.id === selectedId)) {
+          selectedId = 0;
+          await fetch('/api/select-game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gameId: 0 })
+          });
+        }
+        renderGames();
+      } catch (_) {}
+    }
+
+    async function selectGame(id, buttonEl) {
+      if (buttonEl) {
+        buttonEl.disabled = true;
+        buttonEl.classList.add('loading');
+        buttonEl.textContent = 'Loading...';
+      }
+      try {
+        const nextId = (selectedId === id) ? 0 : id;
+        const r = await fetch('/api/select-game', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameId: nextId })
+        });
+        if (!r.ok) throw new Error('Select ' + r.status);
+        selectedId = nextId;
+        renderGames();
+      } catch (e) {
+        setStatus('Error: ' + e.message, 'err');
+        if (buttonEl) {
+          buttonEl.disabled = false;
+          buttonEl.classList.remove('loading');
+          buttonEl.textContent = (selectedId === id) ? 'Selected' : 'Select';
+        }
+      }
+    }
+
+    async function loadDisplayPower() {
+      try {
+        const r = await fetch('/api/display-power');
+        if (!r.ok) throw new Error('Display ' + r.status);
+        const d = await r.json();
+        displayEnabled = !!d.enabled;
+        updateDisplayToggle();
+      } catch (e) {
+        console.log('[display] status error', e.message);
+      }
+    }
+
+    function updateDisplayToggle() {
+      const btn = document.getElementById('display-toggle');
+      if (!btn) return;
+      btn.textContent = displayEnabled ? 'Screen: ON' : 'Screen: OFF';
+    }
+
+    async function toggleDisplay() {
+      try {
+        const next = !displayEnabled;
+        const r = await fetch('/api/display-power', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: next })
+        });
+        if (!r.ok) throw new Error('Display ' + r.status);
+        displayEnabled = next;
+        updateDisplayToggle();
+      } catch (e) {
+        setStatus('Error: ' + e.message, 'err');
+      }
+    }
+
+    async function previewGoal() {
+      try {
+        const btn = document.getElementById('preview-goal');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Playing...';
+        }
+        const r = await fetch('/api/preview-goal', { method: 'POST' });
+        if (!r.ok) throw new Error('Preview ' + r.status);
+      } catch (e) {
+        setStatus('Error: ' + e.message, 'err');
+      } finally {
+        const btn = document.getElementById('preview-goal');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Preview Goal';
+        }
+      }
+    }
+
+    (async () => {
+      await loadSchedule();
+      await loadSelected();
+      await loadDisplayPower();
+    })();
+
+    document.getElementById('display-toggle')?.addEventListener('click', toggleDisplay);
+    document.getElementById('preview-goal')?.addEventListener('click', previewGoal);
+    setInterval(loadSchedule, 30000);
+  </script>
+</body>
+</html>
