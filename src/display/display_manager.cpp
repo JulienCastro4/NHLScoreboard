@@ -37,11 +37,9 @@ namespace {
     }
 
     void buildGoalKey(const GameSnapshot& snap, char* out, size_t outSize) {
-        snprintf(out, outSize, "%u|%u|%u|%s",
+        snprintf(out, outSize, "%u|%u",
             (unsigned)snap.gameId,
-            (unsigned)snap.goalEventId,
-            (unsigned)snap.goalPeriod,
-            snap.goalTime);
+            (unsigned)snap.goalEventId);
     }
 
     void startGoalAnim(const GameSnapshot& snap, uint32_t nowMs) {

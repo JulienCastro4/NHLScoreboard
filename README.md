@@ -5,6 +5,7 @@ Tableau d'affichage NHL en temps réel utilisant un ESP32-S3 et un panneau LED m
 ## 🏒 Fonctionnalités
 
 - **Scores en direct** : Récupération des matchs NHL via l'API NHL
+- **Matchs internationaux** : Support des équipes nationales (Jeux Olympiques, Coupes du Monde)
 - **Affichage dynamique** : Panneau Hub75 32x64 avec logos d'équipes 20x20
 - **Animations de but** : Scène animée déclenchée lors d'un but
 - **API Web** : Interface REST pour contrôler l'affichage
@@ -119,17 +120,28 @@ Une fois connecté, accédez à l'interface via :
 
 ### Logo Builder
 
-Génère les logos NHL au format RGB565 pour le panneau Hub75.
+Génère les logos NHL et internationaux au format RGB565 pour le panneau Hub75.
 
-Voir [tools/logo_builder/README.md](tools/logo_builder/README.md)
+**Documentation complète :** [tools/logo_builder/README.md](tools/logo_builder/README.md)
 
+**Logos NHL :**
 ```bash
 cd tools/logo_builder
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-python build_logos.py --date 2026-02-04 --out ../../data/logos
+python build_logos.py
 ```
+
+**Logos Internationaux (Jeux Olympiques, Coupes du Monde) :**
+```bash
+cd tools/logo_builder
+python build_international_logos.py
+```
+
+Les deux scripts copient automatiquement les logos générés vers `data/logos/`.
+
+**Équipes internationales supportées :** CAN, USA, FIN, SWE, CZE, RUS, SVK, SUI, GER, ITA, LAT, DEN, NOR, AUT, FRA
 
 ## 🐛 Dépannage
 

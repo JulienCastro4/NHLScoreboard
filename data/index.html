@@ -319,7 +319,23 @@
 
     function logoUrl(team) {
       if (team.logo) return team.logo;
-      if (team.abbrev) return 'https://assets.nhle.com/logos/nhl/svg/' + team.abbrev + '_light.svg';
+      
+      if (team.abbrev) {
+        // List of known international team codes
+        const internationalTeams = [
+          'AUT', 'CAN', 'CZE', 'DEN', 'FIN', 'FRA', 'GER', 'ITA', 'LAT',
+          'NOR', 'RUS', 'SVK', 'SUI', 'SWE', 'USA'
+        ];
+        
+        // Check if this is an international team
+        if (internationalTeams.includes(team.abbrev.toUpperCase())) {
+          return 'https://assets.nhle.com/logos/ntl/svg/' + team.abbrev + '_light.svg';
+        }
+        
+        // Default to NHL team logo
+        return 'https://assets.nhle.com/logos/nhl/svg/' + team.abbrev + '_light.svg';
+      }
+      
       return '';
     }
 
