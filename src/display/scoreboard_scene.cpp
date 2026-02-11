@@ -292,7 +292,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     display.drawRGBBitmap(homeX, 0, homeLogo.pixels, homeLogo.width, homeLogo.height);
     homeLogoX = homeX;
 
-    // Scores in center (standard font)
+    // Scores centered between logos (vertically and horizontally)
     char scoreLine[12];
     snprintf(scoreLine, sizeof(scoreLine), "%u-%u",
         (unsigned)data.away.score, (unsigned)data.home.score);
@@ -301,18 +301,21 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     int scoreW = textWidth(scoreLine);
     int scoreX = (panelW - scoreW) / 2;
     if (scoreX < 0) scoreX = 0;
-    display.setCursor(scoreX, 5);
+    const int logoHeight = hasAway ? awayLogo.height : 20;
+    const int scoreY = (logoHeight - 8) / 2; // Center vertically in logos (text height = 8px)
+    display.setCursor(scoreX, scoreY);
     display.print(scoreLine);
 
-    // Center status (period/time or start time)
+    // Center status (period/time or start time) - 2px below score
     display.setTextSize(1);
     char timeLine[16] = {0};
     if (isLive && data.timeRemaining[0] && !data.inIntermission) {
         snprintf(timeLine, sizeof(timeLine), "%s", data.timeRemaining);
     }
+    const int statusBaseY = scoreY + 8 + 2; // Score height (8px) + 2px gap
     if (isLive && timeLine[0]) {
         const int lineGap = 2;
-        const int statusY = 14;
+        const int statusY = statusBaseY;
         const int timeY = statusY + 5 + lineGap;
         int statusW = miniTextWidth(statusLine);
         int statusX = (panelW - statusW) / 2;
@@ -326,38 +329,93 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
         int statusW = miniTextWidth(statusLine);
         int statusX = (panelW - statusW) / 2;
         if (statusX < 0) statusX = 0;
-        drawMiniText(display, statusX, 16, statusLine, display.color565(180, 200, 255));
+        drawMiniText(display, statusX, statusBaseY, statusLine, display.color565(180, 200, 255));
     }
 
-    // Team labels under logos (centered)
+    // Toggle SOG display every 15 seconds during live games (but not during PP)
+    const bool anyPP = data.awayPP || data.homePP;
+    if (isLive && !anyPP) {
+        unsigned long now = millis();
+        if (now - lastToggleMs >= 15000) {
+            showSOG = !showSOG;
+            lastToggleMs = now;
+        }
+    } else {
+        showSOG = false;
+        lastToggleMs = millis();
+    }
+
+    // Team labels under logos
     char awayLine[8];
     char homeLine[8];
-    buildTeamLabel(data.away, awayLine, sizeof(awayLine), 3);
-    buildTeamLabel(data.home, homeLine, sizeof(homeLine), 3);
-    int awayNameY = hasAway ? (awayLogo.height + 1) : 22;
-    int homeNameY = hasHome ? (homeLogo.height + 1) : 22;
-    int awayTextW = miniTextWidth(awayLine);
-    int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
-    if (awayTextX < 0) awayTextX = 0;
-    int homeTextW = miniTextWidth(homeLine);
-    int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
-    if (homeTextX < 0) homeTextX = 0;
-    drawMiniText(display, awayTextX, awayNameY, awayLine, display.color565(255, 255, 255));
-    drawMiniText(display, homeTextX, homeNameY, homeLine, display.color565(255, 255, 255));
+    
+    int awayNameY = hasAway ? awayLogo.height : 21;
+    int homeNameY = hasHome ? homeLogo.height : 21;
+    
+    if (isLive && showSOG && !anyPP) {
+        // Show SOG on 2 lines: number on top, "SOG" below
+        char awaySogNum[8];
+        char homeSogNum[8];
+        snprintf(awaySogNum, sizeof(awaySogNum), "%u", (unsigned)data.away.sog);
+        snprintf(homeSogNum, sizeof(homeSogNum), "%u", (unsigned)data.home.sog);
+        
+        // Line 1: Number (centered under logo)
+        int awayNumW = miniTextWidth(awaySogNum);
+        int awayNumX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayNumW) / 2;
+        if (awayNumX < 0) awayNumX = 0;
+        drawMiniText(display, awayNumX, awayNameY, awaySogNum, display.color565(255, 255, 255));
+        
+        int homeNumW = miniTextWidth(homeSogNum);
+        int homeNumX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeNumW) / 2;
+        if (homeNumX < 0) homeNumX = 0;
+        drawMiniText(display, homeNumX, homeNameY, homeSogNum, display.color565(255, 255, 255));
+        
+        // Line 2: "SOG" (centered under logo)
+        int awaySogW = miniTextWidth("SOG");
+        int awaySogX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awaySogW) / 2;
+        if (awaySogX < 0) awaySogX = 0;
+        drawMiniText(display, awaySogX, awayNameY + 6, "SOG", display.color565(255, 255, 255));
+        
+        int homeSogW = miniTextWidth("SOG");
+        int homeSogX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeSogW) / 2;
+        if (homeSogX < 0) homeSogX = 0;
+        drawMiniText(display, homeSogX, homeNameY + 6, "SOG", display.color565(255, 255, 255));
+    } else {
+        // Show team abbreviation (centered under logo)
+        buildTeamLabel(data.away, awayLine, sizeof(awayLine), 3);
+        buildTeamLabel(data.home, homeLine, sizeof(homeLine), 3);
+        
+        int awayTextW = miniTextWidth(awayLine);
+        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
+        if (awayTextX < 0) awayTextX = 0;
+        
+        int homeTextW = miniTextWidth(homeLine);
+        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
+        if (homeTextX < 0) homeTextX = 0;
+        
+        drawMiniText(display, awayTextX, awayNameY, awayLine, display.color565(255, 255, 255));
+        drawMiniText(display, homeTextX, homeNameY, homeLine, display.color565(255, 255, 255));
+    }
 
-    // PP under team name, aligned to first letter
-    if (data.awayPP) {
+    // PP under team name (only shown when not displaying SOG)
+    if (data.awayPP && !showSOG) {
         const bool flash = ((millis() / 300) % 2) == 0;
         int ppY = awayNameY + 6;
         int ppW = miniTextWidth("PP");
+        int awayTextW = miniTextWidth(awayLine);
+        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
+        if (awayTextX < 0) awayTextX = 0;
         int ppX = awayTextX + (awayTextW - ppW) / 2;
         if (ppX < 0) ppX = 0;
         drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
     }
-    if (data.homePP) {
+    if (data.homePP && !showSOG) {
         const bool flash = ((millis() / 300) % 2) == 0;
         int ppY = homeNameY + 6;
         int ppW = miniTextWidth("PP");
+        int homeTextW = miniTextWidth(homeLine);
+        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
+        if (homeTextX < 0) homeTextX = 0;
         int ppX = homeTextX + (homeTextW - ppW) / 2;
         if (ppX < 0) ppX = 0;
         drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
