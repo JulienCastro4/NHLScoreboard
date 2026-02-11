@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <strings.h>
+#include <time.h>
 
 #include "display/logo_cache.h"
 namespace {
@@ -133,6 +134,60 @@ namespace {
         }
     }
 
+    bool isGameSoonToStart(const GameSnapshot& data) {
+        // Check if game start time has passed but game hasn't started
+        if (!data.startTimeUtc[0]) return false;
+        
+        // Parse start time: format is "YYYY-MM-DDTHH:MM:SSZ"
+        // Example: "2026-02-11T15:30:00Z"
+        if (strlen(data.startTimeUtc) < 16) return false;
+        
+        int startYear = (data.startTimeUtc[0] - '0') * 1000 + (data.startTimeUtc[1] - '0') * 100 +
+                        (data.startTimeUtc[2] - '0') * 10 + (data.startTimeUtc[3] - '0');
+        int startMonth = parseTwo(data.startTimeUtc + 5);
+        int startDay = parseTwo(data.startTimeUtc + 8);
+        
+        const char* t = strchr(data.startTimeUtc, 'T');
+        if (!t || strlen(t) < 6) return false;
+        
+        int startHH = parseTwo(t + 1);
+        int startMM = parseTwo(t + 4);
+        if (startHH < 0 || startMM < 0 || startMonth < 0 || startDay < 0) return false;
+        
+        // Get current time (ESP32 has current time from NTP)
+        time_t now;
+        time(&now);
+        struct tm timeinfo;
+        localtime_r(&now, &timeinfo);
+        
+        // Apply UTC offset to start time
+        int startTotalMinutes = startHH * 60 + startMM + parseOffsetMinutes(data.utcOffset);
+        int startDayAdjust = 0;
+        while (startTotalMinutes < 0) {
+            startTotalMinutes += 24 * 60;
+            startDayAdjust = -1;
+        }
+        if (startTotalMinutes >= 24 * 60) {
+            startTotalMinutes -= 24 * 60;
+            startDayAdjust = 1;
+        }
+        int adjustedDay = startDay + startDayAdjust;
+        
+        // Compare dates first (year, month, day)
+        int currentYear = timeinfo.tm_year + 1900;
+        int currentMonth = timeinfo.tm_mon + 1;  // tm_mon is 0-11
+        int currentDay = timeinfo.tm_mday;
+        
+        // If not the same day, not "soon"
+        if (startYear != currentYear || startMonth != currentMonth || adjustedDay != currentDay) {
+            return false;
+        }
+        
+        // Same day - check if current time >= start time
+        int currentTotalMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+        return (currentTotalMinutes >= startTotalMinutes);
+    }
+
     int textWidth(const char* s) {
         if (!s) return 0;
         return (int)strlen(s) * 6;
@@ -183,7 +238,11 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     formatStartTime(data, startTime, sizeof(startTime));
 
     if (isPre) {
-        snprintf(statusLine, sizeof(statusLine), "%s", startTime);
+        if (isGameSoonToStart(data)) {
+            snprintf(statusLine, sizeof(statusLine), "SOON");
+        } else {
+            snprintf(statusLine, sizeof(statusLine), "%s", startTime);
+        }
     } else if (isFinal) {
         snprintf(statusLine, sizeof(statusLine), "FINAL");
     } else if (isLive) {

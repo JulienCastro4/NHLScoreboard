@@ -9,25 +9,75 @@
 #include "api_server.h"
 #include "prefix_stream.h"
 
-static WebServer* scheduleServer = nullptr;
-
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 static const char* NHL_SCHEDULE_URL = "https://api-web.nhle.com/v1/scoreboard/now";
+static const unsigned long SCHEDULE_MIN_INTERVAL_MS = 30000;
+static const unsigned long SCHEDULE_FAIL_BACKOFF_MS = 30000;
+static const int SCHEDULE_MAX_RETRIES = 5;
+static const unsigned long SCHEDULE_RETRY_BASE_MS = 700;
 
-// /api/schedule: fetch en tache de fond pour limiter TLS/heap.
-static struct { int code; String body; } schedResult;
-static String lastGoodSchedule;
-static unsigned long lastScheduleFetchMs = 0;
-static const unsigned long scheduleMinIntervalMs = 30000;
-static unsigned long lastScheduleFailMs = 0;
-static const unsigned long scheduleFailBackoffMs = 30000;
+// ============================================================================
+// DATA STRUCTURES
+// ============================================================================
+struct ScheduleState {
+    String lastGoodResponse;
+    unsigned long lastFetchMs;
+    unsigned long lastFailMs;
+    bool paused;
+    
+    void reset() {
+        lastGoodResponse = "";
+        lastFetchMs = 0;
+        lastFailMs = 0;
+        paused = false;
+    }
+};
 
+// ============================================================================
+// GLOBALS
+// ============================================================================
+static WebServer* scheduleServer = nullptr;
 static WiFiClientSecure scheduleClient;
+static ScheduleState state;
 
-static const int scheduleMaxRetries = 5;
-static const unsigned long scheduleRetryBaseMs = 700;
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
-// Filtre: scoreboard/now avec champs utiles seulement.
-// "gamesByDate" et "games" doivent etre des JsonArray pour allowArray()=true.
+static void buildTeamJson(const JsonObject& out, JsonObjectConst team) {
+    out["abbrev"] = team["abbrev"] | "?";
+    out["place"] = team["placeNameWithPreposition"]["default"] | "?";
+    out["name"] = team["name"]["default"] | team["commonName"]["default"] | "?";
+    out["score"] = team["score"] | 0;
+    out["sog"] = team["sog"] | 0;
+}
+
+static void buildGameJson(const JsonObject& out, JsonObjectConst game, const char* date) {
+    out["id"] = game["id"];
+    out["date"] = date;
+    out["startTimeUTC"] = game["startTimeUTC"] | "?";
+    out["easternUTCOffset"] = game["easternUTCOffset"] | "";
+    out["gameState"] = game["gameState"] | "?";
+    
+    buildTeamJson(out["away"].to<JsonObject>(), game["awayTeam"]);
+    buildTeamJson(out["home"].to<JsonObject>(), game["homeTeam"]);
+    
+    out["period"] = game["periodDescriptor"]["number"] | 0;
+    
+    if (!game["clock"].isNull()) {
+        JsonObject clock = out["clock"].to<JsonObject>();
+        clock["timeRemaining"] = game["clock"]["timeRemaining"] | "";
+        clock["inIntermission"] = game["clock"]["inIntermission"] | false;
+        clock["running"] = game["clock"]["running"] | false;
+    }
+}
+
+// ============================================================================
+// JSON FILTER SETUP
+// ============================================================================
+
 static void buildScheduleFilter(JsonDocument& f) {
     f["focusedDate"] = true;
     JsonArray days = f["gamesByDate"].to<JsonArray>();
@@ -55,214 +105,237 @@ static void buildScheduleFilter(JsonDocument& f) {
     g["clock"]["timeRemaining"] = true;
     g["clock"]["inIntermission"] = true;
     g["clock"]["running"] = true;
+    g["clock"]["running"] = true;
 }
 
-static bool fetchScheduleOnce() {
-    Serial.printf("[schedule] fetch start @%lu\n", millis());
-    lastScheduleFetchMs = millis();
-    int code = -1;
-    JsonDocument doc;
-    static JsonDocument filterDoc;
-    static bool filterOk;
-    if (!filterOk) {
-        buildScheduleFilter(filterDoc);
-        filterOk = true;
-    }
+// ============================================================================
+// HTTP REQUEST & PARSING
+// ============================================================================
+
+static DeserializationError fetchAndParseJson(JsonDocument& doc, JsonDocument& filterDoc) {
     DeserializationError err = DeserializationError::InvalidInput;
-
-    for (int attempt = 0; attempt < scheduleMaxRetries; attempt++) {
+    int code = -1;
+    
+    for (int attempt = 0; attempt < SCHEDULE_MAX_RETRIES; attempt++) {
         scheduleClient.stop();
-
         HTTPClient http;
         http.setTimeout(30000);
         http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
         if (!http.begin(scheduleClient, NHL_SCHEDULE_URL)) {
             Serial.printf("[schedule] attempt %d: http.begin failed\n", attempt + 1);
-            if (attempt < scheduleMaxRetries - 1) delay(scheduleRetryBaseMs * (1UL << attempt));
+            if (attempt < SCHEDULE_MAX_RETRIES - 1) {
+                delay(SCHEDULE_RETRY_BASE_MS * (1UL << attempt));
+            }
             continue;
         }
+        
         http.addHeader("User-Agent", "Mozilla/5.0 (compatible; Scoreboard/1.0)");
-
         code = http.GET();
+        
         if (code != HTTP_CODE_OK) {
             Serial.printf("[schedule] attempt %d: GET code=%d\n", attempt + 1, code);
             http.end();
-            if (attempt < scheduleMaxRetries - 1) delay(scheduleRetryBaseMs * (1UL << attempt));
+            if (attempt < SCHEDULE_MAX_RETRIES - 1) {
+                delay(SCHEDULE_RETRY_BASE_MS * (1UL << attempt));
+            }
             continue;
         }
+        
+        // Skip any garbage before JSON
         Stream& s = *http.getStreamPtr();
         uint32_t start = millis();
         int c = -1;
         size_t skipped = 0;
+        
         while ((millis() - start) < 5000) {
             if (s.available()) {
                 c = s.read();
-                if (c == '{')
-                    break;
+                if (c == '{') break;
                 skipped++;
             } else {
                 delay(1);
             }
         }
+        
         if (c != '{') {
             err = DeserializationError::InvalidInput;
             Serial.printf("[schedule] no JSON start (skipped=%u)\n", (unsigned)skipped);
         } else {
-            if (skipped > 0)
+            if (skipped > 0) {
                 Serial.printf("[schedule] skipped=%u before JSON\n", (unsigned)skipped);
+            }
             PrefixStream ps(s, '{');
             err = deserializeJson(doc, ps,
                 DeserializationOption::Filter(filterDoc),
                 DeserializationOption::NestingLimit(16));
         }
+        
         http.end();
         scheduleClient.stop();
         delay(50);
+        
         if (!err) break;
         Serial.printf("[schedule] attempt %d: parse %s\n", attempt + 1, err.c_str());
-        if (attempt < scheduleMaxRetries - 1) delay(scheduleRetryBaseMs * (1UL << attempt));
+        if (attempt < SCHEDULE_MAX_RETRIES - 1) {
+            delay(SCHEDULE_RETRY_BASE_MS * (1UL << attempt));
+        }
     }
+    
+    return err;
+}
 
-    if (code != HTTP_CODE_OK) {
-        lastScheduleFailMs = millis();
-        return false;
+static JsonObject findTargetDay(JsonArray gamesByDate, const char* focusedDate) {
+    if (focusedDate && focusedDate[0]) {
+        for (JsonObject day : gamesByDate) {
+            const char* date = day["date"] | "";
+            if (strcmp(date, focusedDate) == 0) {
+                return day;
+            }
+        }
     }
+    // Fallback to first day
+    return gamesByDate[0];
+}
+
+// ============================================================================
+// MAIN FETCH & PROCESS
+// ============================================================================
+
+static bool fetchScheduleOnce() {
+    Serial.printf("[schedule] fetch start @%lu\n", millis());
+    state.lastFetchMs = millis();
+    
+    // Prepare filter
+    JsonDocument doc;
+    static JsonDocument filterDoc;
+    static bool filterReady = false;
+    if (!filterReady) {
+        buildScheduleFilter(filterDoc);
+        filterReady = true;
+    }
+    
+    // Fetch and parse
+    DeserializationError err = fetchAndParseJson(doc, filterDoc);
     if (err) {
-        lastScheduleFailMs = millis();
+        state.lastFailMs = millis();
         return false;
     }
-
-    const char* focused = doc["focusedDate"] | "";
+    
+    // Extract focused date and games
+    const char* focusedDate = doc["focusedDate"] | "";
     JsonArray gamesByDate = doc["gamesByDate"];
+    
     if (gamesByDate.isNull()) {
         Serial.println("[schedule] gamesByDate is null");
-        lastScheduleFailMs = millis();
+        state.lastFailMs = millis();
         return false;
     }
-
-    JsonDocument out;
-    JsonObject root = out.to<JsonObject>();
-    JsonArray arr = root["games"].to<JsonArray>();
-
+    
     Serial.printf("[schedule] focusedDate=%s days=%u\n",
-        focused[0] ? focused : "(empty)",
+        focusedDate[0] ? focusedDate : "(empty)",
         (unsigned)gamesByDate.size());
+    
     if (gamesByDate.size() > 0) {
         const char* firstDate = gamesByDate[0]["date"] | "?";
         Serial.printf("[schedule] firstDate=%s\n", firstDate);
     }
-
-    JsonObject target;
-    if (focused[0]) {
-        for (JsonObject w : gamesByDate) {
-            const char* date = w["date"] | "";
-            if (strcmp(date, focused) == 0) {
-                target = w;
-                break;
-            }
-        }
+    
+    // Find target day (focused or first)
+    JsonObject targetDay = findTargetDay(gamesByDate, focusedDate);
+    if (targetDay.isNull()) {
+        Serial.println("[schedule] no target day found");
+        state.lastFailMs = millis();
+        return false;
     }
-    if (target.isNull())
-        target = gamesByDate[0];
-
-    unsigned int totalGames = 0;
-    if (!target.isNull()) {
-        const char* date = target["date"] | "?";
-        JsonArray games = target["games"];
-        Serial.printf("[schedule] targetDate=%s games=%u\n",
-            date, (unsigned)games.size());
-        for (JsonObject g : games) {
-            JsonObject o = arr.add<JsonObject>();
-            o["id"] = g["id"];
-            o["date"] = date;
-            o["startTimeUTC"] = g["startTimeUTC"] | "?";
-            o["easternUTCOffset"] = g["easternUTCOffset"] | "";
-            o["gameState"] = g["gameState"] | "?";
-
-            JsonObject at = g["awayTeam"].as<JsonObject>();
-            JsonObject ht = g["homeTeam"].as<JsonObject>();
-
-            JsonObject ao = o["away"].to<JsonObject>();
-            ao["abbrev"] = at["abbrev"] | "?";
-            ao["place"] = at["placeNameWithPreposition"]["default"] | "?";
-            ao["name"] = at["name"]["default"] | at["commonName"]["default"] | "?";
-            ao["score"] = at["score"] | 0;
-            ao["sog"] = at["sog"] | 0;
-
-            JsonObject ho = o["home"].to<JsonObject>();
-            ho["abbrev"] = ht["abbrev"] | "?";
-            ho["place"] = ht["placeNameWithPreposition"]["default"] | "?";
-            ho["name"] = ht["name"]["default"] | ht["commonName"]["default"] | "?";
-            ho["score"] = ht["score"] | 0;
-            ho["sog"] = ht["sog"] | 0;
-
-            if (!g["periodDescriptor"].isNull())
-                o["period"] = g["periodDescriptor"]["number"] | 0;
-            else
-                o["period"] = 0;
-            if (!g["clock"].isNull()) {
-                JsonObject co = o["clock"].to<JsonObject>();
-                co["timeRemaining"] = g["clock"]["timeRemaining"] | "";
-                co["inIntermission"] = g["clock"]["inIntermission"] | false;
-                co["running"] = g["clock"]["running"] | false;
-            }
-            totalGames++;
-        }
+    
+    const char* targetDate = targetDay["date"] | "?";
+    JsonArray games = targetDay["games"];
+    
+    Serial.printf("[schedule] targetDate=%s games=%u\n",
+        targetDate, (unsigned)games.size());
+    
+    // Build output
+    JsonDocument out;
+    JsonArray outGames = out["games"].to<JsonArray>();
+    
+    for (JsonObject game : games) {
+        JsonObject outGame = outGames.add<JsonObject>();
+        buildGameJson(outGame, game, targetDate);
     }
+    
     Serial.printf("[schedule] focused=%s games=%u\n",
-        focused[0] ? focused : "(empty)", totalGames);
-
-    serializeJson(out, schedResult.body);
-    schedResult.code = 200;
-    lastGoodSchedule = schedResult.body;
-    lastScheduleFetchMs = millis();
-    lastScheduleFailMs = 0;
-    Serial.printf("[schedule] fetch ok bytes=%u\n", (unsigned)lastGoodSchedule.length());
+        focusedDate[0] ? focusedDate : "(empty)", 
+        (unsigned)games.size());
+    
+    serializeJson(out, state.lastGoodResponse);
+    state.lastFetchMs = millis();
+    state.lastFailMs = 0;
+    
+    Serial.printf("[schedule] fetch ok bytes=%u\n", 
+        (unsigned)state.lastGoodResponse.length());
     return true;
 }
 
+// ============================================================================
+// BACKGROUND TASK
+// ============================================================================
+
 static void schedulePollTask(void*) {
-    bool paused = false;
     for (;;) {
+        // Pause when a game is selected
         if (apiServerGetSelectedGameId() != 0) {
-            if (!paused) {
+            if (!state.paused) {
                 Serial.println("[schedule] paused (game selected)");
-                paused = true;
+                state.paused = true;
             }
             vTaskDelay(1000 / portTICK_PERIOD_MS);
             continue;
         }
-        if (paused) {
+        
+        if (state.paused) {
             Serial.println("[schedule] resumed (no game selected)");
-            paused = false;
+            state.paused = false;
         }
-        if (lastScheduleFailMs > 0) {
+        
+        // Backoff after failure
+        if (state.lastFailMs > 0) {
             unsigned long now = millis();
-            if (now - lastScheduleFailMs < scheduleFailBackoffMs) {
-                vTaskDelay(scheduleFailBackoffMs / portTICK_PERIOD_MS);
+            if (now - state.lastFailMs < SCHEDULE_FAIL_BACKOFF_MS) {
+                vTaskDelay(SCHEDULE_FAIL_BACKOFF_MS / portTICK_PERIOD_MS);
                 continue;
             }
         }
+        
         fetchScheduleOnce();
-        vTaskDelay(scheduleMinIntervalMs / portTICK_PERIOD_MS);
+        vTaskDelay(SCHEDULE_MIN_INTERVAL_MS / portTICK_PERIOD_MS);
     }
 }
 
+// ============================================================================
+// API ENDPOINT HANDLER
+// ============================================================================
+
 static void handleApiSchedule() {
-    if (lastGoodSchedule.length() > 0) {
-        scheduleServer->send(200, "application/json", lastGoodSchedule);
+    if (state.lastGoodResponse.length() > 0) {
+        scheduleServer->send(200, "application/json", state.lastGoodResponse);
         return;
     }
     scheduleServer->send(503, "application/json", "{\"error\":\"warming\"}");
 }
 
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
 void scheduleServiceInit(WebServer& server) {
     scheduleServer = &server;
     scheduleClient.setInsecure();
     scheduleClient.setTimeout(30);
+    
     scheduleServer->on("/api/schedule", HTTP_GET, handleApiSchedule);
+    
     if (xTaskCreate(schedulePollTask, "sched_poll", 16384, NULL, 1, NULL) != pdPASS) {
-        Serial.println("Warn: sched_poll task");
+        Serial.println("Warn: sched_poll task creation failed");
     }
 }

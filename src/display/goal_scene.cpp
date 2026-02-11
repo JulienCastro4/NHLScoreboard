@@ -290,7 +290,7 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
         const int wLast = textWidth(last);
         const int yFirst = 4;
         const int yLast = 14;
-        uint16_t shadow = display.color565(64, 64, 64);
+        uint16_t shadow = display.color565(58, 58, 58);
         uint16_t main = display.color565(150, 150, 150);
 
         int xFirst = 0;
@@ -301,7 +301,7 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
             }
         }
 
-        int xLast = 6; // 1-letter offset
+        int xLast = 0; // No offset
         if (last[0]) {
             if (t < firstPhase) {
                 xLast = width;
@@ -309,9 +309,9 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
                 uint32_t tLast = t - firstPhase;
                 if (tLast < lastPhase) {
                     xLast = width - (int)((tLast * (width + wLast)) / lastPhase);
-                    if (xLast < 6) xLast = 6;
+                    if (xLast < 0) xLast = 0;
                 } else {
-                    xLast = 6;
+                    xLast = 0;
                 }
             }
         }

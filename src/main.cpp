@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <LittleFS.h>
 #include <ESPmDNS.h>
+#include <time.h>
 
 #include "secrets.h"
 #include "api_server.h"
@@ -30,6 +31,24 @@ void setup() {
     Serial.println();
     Serial.print("Connecté. IP: ");
     Serial.println(WiFi.localIP());
+
+    // Configure NTP for time synchronization
+    Serial.print("Synchronisation NTP...");
+    configTime(-5 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+    // Wait for time to be set (max 10 seconds)
+    int retry = 0;
+    while (time(nullptr) < 100000 && retry < 20) {
+        delay(500);
+        Serial.print(".");
+        retry++;
+    }
+    Serial.println();
+    time_t now = time(nullptr);
+    if (now > 100000) {
+        Serial.printf("NTP OK: %s", ctime(&now));
+    } else {
+        Serial.println("NTP échec - temps non synchronisé");
+    }
 
     if (MDNS.begin("scoreboardapp")) {
         MDNS.addService("http", "tcp", 80);
