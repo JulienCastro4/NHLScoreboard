@@ -226,14 +226,23 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     display.setTextWrap(false);
 
     if (data.gameId == 0) {
-        display.setTextSize(1);
-        display.setTextColor(display.color565(220, 220, 220));
-        const char* msg = "NO GAME";
-        int msgW = textWidth(msg);
-        int msgX = (display.width() - msgW) / 2;
-        if (msgX < 0) msgX = 0;
-        display.setCursor(msgX, 12);
-        display.print(msg);
+        LogoBitmap nhlLogo{};
+        if (logoLoadStatic("/logos/nhl_logo.rgb565", nhlLogo)) {
+            int x = (display.width() - nhlLogo.width) / 2;
+            int y = (display.height() - nhlLogo.height) / 2;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            display.drawRGBBitmap(x, y, nhlLogo.pixels, nhlLogo.width, nhlLogo.height);
+        } else {
+            display.setTextSize(1);
+            display.setTextColor(display.color565(220, 220, 220));
+            const char* msg = "NHL";
+            int msgW = textWidth(msg);
+            int msgX = (display.width() - msgW) / 2;
+            if (msgX < 0) msgX = 0;
+            display.setCursor(msgX, 12);
+            display.print(msg);
+        }
         return;
     }
 

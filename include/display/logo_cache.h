@@ -11,4 +11,5 @@ struct LogoBitmap {
 void logoCacheInit();
 bool logoCacheGet(const char* abbrev, LogoBitmap& out);
 void logoCacheClear();
+bool logoLoadStatic(const char* path, LogoBitmap& out);
 

@@ -41,6 +41,10 @@ namespace {
             sizeOut = 25;
             return true;
         }
+        if (bytes == 30 * 30 * 2) {
+            sizeOut = 30;
+            return true;
+        }
         return false;
     }
 
@@ -217,6 +221,42 @@ bool logoCacheGet(const char* abbrev, LogoBitmap& out) {
     out.pixels = target->pixels;
     out.width = target->width;
     out.height = target->height;
+    return true;
+}
+
+bool logoLoadStatic(const char* path, LogoBitmap& out) {
+    static uint16_t* staticPixels = nullptr;
+    static uint8_t staticW = 0, staticH = 0;
+    if (staticPixels) {
+        out.pixels = staticPixels;
+        out.width = staticW;
+        out.height = staticH;
+        return true;
+    }
+    File f = LittleFS.open(path, "r");
+    if (!f) return false;
+    size_t sizeBytes = f.size();
+    uint8_t logoSize = 0;
+    if (!sizeFromFile(sizeBytes, logoSize)) {
+        f.close();
+        return false;
+    }
+    size_t pixelCount = (size_t)logoSize * (size_t)logoSize;
+    uint16_t* data = (uint16_t*)malloc(pixelCount * sizeof(uint16_t));
+    if (!data) { f.close(); return false; }
+    for (size_t i = 0; i < pixelCount; ++i) {
+        int lo = f.read();
+        int hi = f.read();
+        if (lo < 0 || hi < 0) { free(data); f.close(); return false; }
+        data[i] = adjustForLowDepth((uint16_t)((hi << 8) | lo));
+    }
+    f.close();
+    staticPixels = data;
+    staticW = logoSize;
+    staticH = logoSize;
+    out.pixels = staticPixels;
+    out.width = staticW;
+    out.height = staticH;
     return true;
 }
 
