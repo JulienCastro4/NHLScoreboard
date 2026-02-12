@@ -51,6 +51,7 @@ struct PbpState {
     uint32_t gameId;
     int lastPlaySortOrder;
     bool primed;
+    bool hadEmptyFetch;
 };
 
 struct RosterCache {
@@ -150,14 +151,28 @@ static void parseGoalEvent(JsonObject play, GoalInfo& goal) {
 }
 
 static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
-    if (plays.isNull() || plays.size() == 0) return;
-    
+    if (plays.isNull() || plays.size() == 0) {
+        state.hadEmptyFetch = true;
+        return;
+    }
+
     const int lastIdx = (int)plays.size() - 1;
     JsonObject lastPlay = plays[lastIdx];
     const int lastSortOrder = lastPlay["sortOrder"] | 0;
-    
+
     // Prime on first fetch
     if (!state.primed) {
+        // If we previously got empty plays, the game just started —
+        // check if any of these first plays are goals
+        if (state.hadEmptyFetch) {
+            for (JsonObject play : plays) {
+                const char* type = play["typeDescKey"] | "";
+                if (String(type).equalsIgnoreCase("goal")) {
+                    parseGoalEvent(play, goal);
+                    break;
+                }
+            }
+        }
         state.lastPlaySortOrder = lastSortOrder;
         state.primed = true;
         return;
@@ -372,6 +387,14 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
     JsonArray plays = doc["plays"];
     detectNewGoals(plays, goal);
 
+    if (goal.isNew) {
+        Serial.printf("[pbp] GOAL detected: scorer='%s' a1='%s' a2='%s' eventId=%d\n",
+            goal.scoringPlayerName.c_str(),
+            goal.assist1Name.c_str(),
+            goal.assist2Name.c_str(),
+            goal.eventId);
+    }
+
     // Update data model
     dataModelUpdateFromPbp(
         gameId,
@@ -491,6 +514,7 @@ static void playByPlayPollTask(void*) {
             state.lastFetchMs = 0;
             state.lastPlaySortOrder = -1;
             state.primed = false;
+            state.hadEmptyFetch = false;
             rosterCache.clear();
             
             fetchPlayByPlayOnce(gameId);

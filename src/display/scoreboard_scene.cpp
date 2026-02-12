@@ -5,8 +5,10 @@
 #include <time.h>
 
 #include "display/logo_cache.h"
-namespace {
-    struct MiniGlyph {
+namespace
+{
+    struct MiniGlyph
+    {
         char c;
         uint8_t rows[5];
     };
@@ -50,203 +52,261 @@ namespace {
         {'W', {0b101, 0b101, 0b111, 0b111, 0b101}},
         {'X', {0b101, 0b101, 0b010, 0b101, 0b101}},
         {'Y', {0b101, 0b101, 0b010, 0b010, 0b010}},
-        {'Z', {0b111, 0b001, 0b010, 0b100, 0b111}}
-    };
+        {'Z', {0b111, 0b001, 0b010, 0b100, 0b111}}};
 
-    const MiniGlyph* findGlyph(char c) {
-        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
-        for (size_t i = 0; i < sizeof(kMiniFont) / sizeof(kMiniFont[0]); ++i) {
-            if (kMiniFont[i].c == c) return &kMiniFont[i];
+    const MiniGlyph *findGlyph(char c)
+    {
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 32);
+        for (size_t i = 0; i < sizeof(kMiniFont) / sizeof(kMiniFont[0]); ++i)
+        {
+            if (kMiniFont[i].c == c)
+                return &kMiniFont[i];
         }
         return &kMiniFont[0];
     }
 
-    void drawMiniChar(MatrixPanel_I2S_DMA& display, int x, int y, char c, uint16_t color) {
-        const MiniGlyph* g = findGlyph(c);
-        for (int row = 0; row < 5; ++row) {
-            for (int col = 0; col < 3; ++col) {
-                if (g->rows[row] & (1 << (2 - col))) {
+    void drawMiniChar(MatrixPanel_I2S_DMA &display, int x, int y, char c, uint16_t color)
+    {
+        const MiniGlyph *g = findGlyph(c);
+        for (int row = 0; row < 5; ++row)
+        {
+            for (int col = 0; col < 3; ++col)
+            {
+                if (g->rows[row] & (1 << (2 - col)))
+                {
                     display.drawPixel(x + col, y + row, color);
                 }
             }
         }
     }
 
-    void drawMiniText(MatrixPanel_I2S_DMA& display, int x, int y, const char* text, uint16_t color) {
-        if (!text) return;
+    void drawMiniText(MatrixPanel_I2S_DMA &display, int x, int y, const char *text, uint16_t color)
+    {
+        if (!text)
+            return;
         int cursor = x;
-        for (size_t i = 0; text[i]; ++i) {
+        for (size_t i = 0; text[i]; ++i)
+        {
             drawMiniChar(display, cursor, y, text[i], color);
             cursor += 4;
         }
     }
 
-    int miniTextWidth(const char* text) {
-        if (!text || !text[0]) return 0;
+    int miniTextWidth(const char *text)
+    {
+        if (!text || !text[0])
+            return 0;
         return ((int)strlen(text) * 4) - 1;
     }
 
-
-    int parseTwo(const char* s) {
-        if (!s || s[0] < '0' || s[1] < '0') return -1;
+    int parseTwo(const char *s)
+    {
+        if (!s || s[0] < '0' || s[1] < '0')
+            return -1;
         return (s[0] - '0') * 10 + (s[1] - '0');
     }
 
-    int parseOffsetMinutes(const char* offset) {
-        if (!offset || !offset[0]) return 0;
-        if ((offset[0] != '+' && offset[0] != '-') || strlen(offset) < 6) return 0;
+    int parseOffsetMinutes(const char *offset)
+    {
+        if (!offset || !offset[0])
+            return 0;
+        if ((offset[0] != '+' && offset[0] != '-') || strlen(offset) < 6)
+            return 0;
         int sign = (offset[0] == '-') ? -1 : 1;
         int hh = parseTwo(offset + 1);
         int mm = parseTwo(offset + 4);
-        if (hh < 0 || mm < 0) return 0;
+        if (hh < 0 || mm < 0)
+            return 0;
         return sign * (hh * 60 + mm);
     }
 
-    void formatStartTime(const GameSnapshot& data, char* out, size_t outSize) {
-        if (!out || outSize == 0) return;
-        if (!data.startTimeUtc[0]) {
+    void formatStartTime(const GameSnapshot &data, char *out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return;
+        if (!data.startTimeUtc[0])
+        {
             strncpy(out, "??:??", outSize);
             out[outSize - 1] = '\0';
             return;
         }
-        const char* t = strchr(data.startTimeUtc, 'T');
-        if (!t || strlen(t) < 6) {
+        const char *t = strchr(data.startTimeUtc, 'T');
+        if (!t || strlen(t) < 6)
+        {
             strncpy(out, "??:??", outSize);
             out[outSize - 1] = '\0';
             return;
         }
         int hh = parseTwo(t + 1);
         int mm = parseTwo(t + 4);
-        if (hh < 0 || mm < 0) {
+        if (hh < 0 || mm < 0)
+        {
             strncpy(out, "??:??", outSize);
             out[outSize - 1] = '\0';
             return;
         }
         int total = hh * 60 + mm + parseOffsetMinutes(data.utcOffset);
-        while (total < 0) total += 24 * 60;
+        while (total < 0)
+            total += 24 * 60;
         total %= 24 * 60;
         int outH = total / 60;
         int outM = total % 60;
-        if (outM == 0) {
+        if (outM == 0)
+        {
             snprintf(out, outSize, "%02dH", outH);
-        } else {
+        }
+        else
+        {
             snprintf(out, outSize, "%02dH%02d", outH, outM);
         }
     }
 
-    bool isGameSoonToStart(const GameSnapshot& data) {
+    bool isGameSoonToStart(const GameSnapshot &data)
+    {
         // Check if game start time has passed but game hasn't started
-        if (!data.startTimeUtc[0]) return false;
-        
+        if (!data.startTimeUtc[0])
+            return false;
+
         // Parse start time: format is "YYYY-MM-DDTHH:MM:SSZ"
         // Example: "2026-02-11T15:30:00Z"
-        if (strlen(data.startTimeUtc) < 16) return false;
-        
+        if (strlen(data.startTimeUtc) < 16)
+            return false;
+
         int startYear = (data.startTimeUtc[0] - '0') * 1000 + (data.startTimeUtc[1] - '0') * 100 +
                         (data.startTimeUtc[2] - '0') * 10 + (data.startTimeUtc[3] - '0');
         int startMonth = parseTwo(data.startTimeUtc + 5);
         int startDay = parseTwo(data.startTimeUtc + 8);
-        
-        const char* t = strchr(data.startTimeUtc, 'T');
-        if (!t || strlen(t) < 6) return false;
-        
+
+        const char *t = strchr(data.startTimeUtc, 'T');
+        if (!t || strlen(t) < 6)
+            return false;
+
         int startHH = parseTwo(t + 1);
         int startMM = parseTwo(t + 4);
-        if (startHH < 0 || startMM < 0 || startMonth < 0 || startDay < 0) return false;
-        
+        if (startHH < 0 || startMM < 0 || startMonth < 0 || startDay < 0)
+            return false;
+
         // Get current time (ESP32 has current time from NTP)
         time_t now;
         time(&now);
         struct tm timeinfo;
         localtime_r(&now, &timeinfo);
-        
+
         // Apply UTC offset to start time
         int startTotalMinutes = startHH * 60 + startMM + parseOffsetMinutes(data.utcOffset);
         int startDayAdjust = 0;
-        while (startTotalMinutes < 0) {
+        while (startTotalMinutes < 0)
+        {
             startTotalMinutes += 24 * 60;
             startDayAdjust = -1;
         }
-        if (startTotalMinutes >= 24 * 60) {
+        if (startTotalMinutes >= 24 * 60)
+        {
             startTotalMinutes -= 24 * 60;
             startDayAdjust = 1;
         }
         int adjustedDay = startDay + startDayAdjust;
-        
+
         // Compare dates first (year, month, day)
         int currentYear = timeinfo.tm_year + 1900;
-        int currentMonth = timeinfo.tm_mon + 1;  // tm_mon is 0-11
+        int currentMonth = timeinfo.tm_mon + 1; // tm_mon is 0-11
         int currentDay = timeinfo.tm_mday;
-        
+
         // If not the same day, not "soon"
-        if (startYear != currentYear || startMonth != currentMonth || adjustedDay != currentDay) {
+        if (startYear != currentYear || startMonth != currentMonth || adjustedDay != currentDay)
+        {
             return false;
         }
-        
+
         // Same day - check if current time >= start time
         int currentTotalMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
         return (currentTotalMinutes >= startTotalMinutes);
     }
 
-    int textWidth(const char* s) {
-        if (!s) return 0;
+    int textWidth(const char *s)
+    {
+        if (!s)
+            return 0;
         return (int)strlen(s) * 6;
     }
 
-    bool isClockExpired(const char* timeRemaining) {
-        if (!timeRemaining || !timeRemaining[0]) return false;
+    bool isClockExpired(const char *timeRemaining)
+    {
+        if (!timeRemaining || !timeRemaining[0])
+            return false;
         // Check if all digits are '0' (handles "00:00", "0:00", "00:00.0", etc.)
-        for (const char* p = timeRemaining; *p; ++p) {
-            if (*p >= '1' && *p <= '9') return false;
+        for (const char *p = timeRemaining; *p; ++p)
+        {
+            if (*p >= '1' && *p <= '9')
+                return false;
         }
         return true;
     }
 
-    void truncateText(char* text, size_t maxLen) {
-        if (!text || maxLen == 0) return;
-        if (strlen(text) <= maxLen) return;
+    void truncateText(char *text, size_t maxLen)
+    {
+        if (!text || maxLen == 0)
+            return;
+        if (strlen(text) <= maxLen)
+            return;
         text[maxLen] = '\0';
     }
 
-    void buildTeamLabel(const TeamInfo& team, char* out, size_t outSize, size_t maxLen) {
-        if (!out || outSize == 0) return;
-        if (team.abbrev[0]) {
+    void buildTeamLabel(const TeamInfo &team, char *out, size_t outSize, size_t maxLen)
+    {
+        if (!out || outSize == 0)
+            return;
+        if (team.abbrev[0])
+        {
             snprintf(out, outSize, "%s", team.abbrev);
-        } else if (team.name[0]) {
+        }
+        else if (team.name[0])
+        {
             snprintf(out, outSize, "%s", team.name);
-        } else {
+        }
+        else
+        {
             snprintf(out, outSize, "?");
         }
         truncateText(out, maxLen);
     }
 }
 
-void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, uint32_t) {
+void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &data, uint32_t)
+{
     display.clearScreen();
     display.setTextWrap(false);
 
-    if (data.gameId == 0) {
+    if (data.gameId == 0)
+    {
         LogoBitmap nhlLogo{};
-        if (logoLoadStatic("/logos/nhl_logo.rgb565", nhlLogo)) {
+        if (logoLoadStatic("/logos/nhl_logo.rgb565", nhlLogo))
+        {
             int x = (display.width() - nhlLogo.width) / 2;
             int y = (display.height() - nhlLogo.height) / 2;
-            if (x < 0) x = 0;
-            if (y < 0) y = 0;
+            if (x < 0)
+                x = 0;
+            if (y < 0)
+                y = 0;
             display.drawRGBBitmap(x, y, nhlLogo.pixels, nhlLogo.width, nhlLogo.height);
-        } else {
+        }
+        else
+        {
             display.setTextSize(1);
             display.setTextColor(display.color565(220, 220, 220));
-            const char* msg = "NHL";
+            const char *msg = "NHL";
             int msgW = textWidth(msg);
             int msgX = (display.width() - msgW) / 2;
-            if (msgX < 0) msgX = 0;
+            if (msgX < 0)
+                msgX = 0;
             display.setCursor(msgX, 12);
             display.print(msg);
         }
         return;
     }
 
-    const char* state = data.gameState;
+    const char *state = data.gameState;
     const bool isPre = (strcasecmp(state, "PRE") == 0 || strcasecmp(state, "FUT") == 0);
     const bool isFinal = (strcasecmp(state, "OFF") == 0 || strcasecmp(state, "FINAL") == 0);
     const bool isLive = (strcasecmp(state, "LIVE") == 0 || strcasecmp(state, "CRIT") == 0);
@@ -255,31 +315,65 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     char startTime[8] = {0};
     formatStartTime(data, startTime, sizeof(startTime));
 
-    if (isPre) {
-        if (isGameSoonToStart(data)) {
+    if (isPre)
+    {
+        if (isGameSoonToStart(data))
+        {
             snprintf(statusLine, sizeof(statusLine), "SOON");
-        } else {
+        }
+        else
+        {
             snprintf(statusLine, sizeof(statusLine), "%s", startTime);
         }
-    } else if (isFinal) {
+    }
+    else if (isFinal)
+    {
         snprintf(statusLine, sizeof(statusLine), "FINAL");
-    } else if (isLive) {
-        if (data.inIntermission || (data.period > 0 && isClockExpired(data.timeRemaining))) {
-            if (data.period == 1) {
+    }
+    else if (isLive)
+    {
+        if (data.inIntermission || (data.period > 0 && isClockExpired(data.timeRemaining)))
+        {
+            if (data.period == 1)
+            {
                 snprintf(statusLine, sizeof(statusLine), "END 1ST");
-            } else if (data.period == 2) {
+            }
+            else if (data.period == 2)
+            {
                 snprintf(statusLine, sizeof(statusLine), "END 2ND");
-            } else if (data.period == 3) {
+            }
+            else if (data.period == 3)
+            {
                 snprintf(statusLine, sizeof(statusLine), "END 3RD");
-            } else {
+            }
+            else if (data.period == 4)
+            {
+                snprintf(statusLine, sizeof(statusLine), "END 4TH");
+            }
+            else if (data.period == 5)
+            {
+                snprintf(statusLine, sizeof(statusLine), "END 5TH");
+            }
+            else if (data.period == 6)
+            {
+                snprintf(statusLine, sizeof(statusLine), "END 6TH");
+            }
+            else
+            {
                 snprintf(statusLine, sizeof(statusLine), "INT");
             }
-        } else if (data.period > 0 && data.timeRemaining[0]) {
+        }
+        else if (data.period > 0 && data.timeRemaining[0])
+        {
             snprintf(statusLine, sizeof(statusLine), "P-%u", (unsigned)data.period);
-        } else {
+        }
+        else
+        {
             snprintf(statusLine, sizeof(statusLine), "LIVE");
         }
-    } else if (state && state[0]) {
+    }
+    else if (state && state[0])
+    {
         snprintf(statusLine, sizeof(statusLine), "%s", state);
     }
 
@@ -290,13 +384,15 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     LogoBitmap homeLogo{};
     const bool hasAway = logoCacheGet(data.away.abbrev, awayLogo);
     const bool hasHome = logoCacheGet(data.home.abbrev, homeLogo);
-    if (!hasAway || !hasHome) {
+    if (!hasAway || !hasHome)
+    {
         display.setTextSize(1);
         display.setTextColor(display.color565(200, 200, 200));
-        const char* msg = "LOADING";
+        const char *msg = "LOADING";
         int msgW = textWidth(msg);
         int msgX = (panelW - msgW) / 2;
-        if (msgX < 0) msgX = 0;
+        if (msgX < 0)
+            msgX = 0;
         display.setCursor(msgX, 12);
         display.print(msg);
         return;
@@ -306,19 +402,21 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     int homeLogoX = panelW - 20;
     display.drawRGBBitmap(0, 0, awayLogo.pixels, awayLogo.width, awayLogo.height);
     int homeX = panelW - homeLogo.width;
-    if (homeX < 0) homeX = 0;
+    if (homeX < 0)
+        homeX = 0;
     display.drawRGBBitmap(homeX, 0, homeLogo.pixels, homeLogo.width, homeLogo.height);
     homeLogoX = homeX;
 
     // Scores centered between logos (vertically and horizontally)
     char scoreLine[12];
     snprintf(scoreLine, sizeof(scoreLine), "%u-%u",
-        (unsigned)data.away.score, (unsigned)data.home.score);
+             (unsigned)data.away.score, (unsigned)data.home.score);
     display.setTextSize(1);
     display.setTextColor(display.color565(255, 255, 255));
     int scoreW = textWidth(scoreLine);
     int scoreX = (panelW - scoreW) / 2;
-    if (scoreX < 0) scoreX = 0;
+    if (scoreX < 0)
+        scoreX = 0;
     const int logoHeight = hasAway ? awayLogo.height : 20;
     const int scoreY = (logoHeight - 8) / 2; // Center vertically in logos (text height = 8px)
     display.setCursor(scoreX, scoreY);
@@ -327,38 +425,50 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     // Center status (period/time or start time) - 2px below score
     display.setTextSize(1);
     char timeLine[16] = {0};
-    if (isLive && data.timeRemaining[0] && !data.inIntermission) {
+    if (isLive && data.timeRemaining[0] && !data.inIntermission && !isClockExpired(data.timeRemaining))
+    {
         snprintf(timeLine, sizeof(timeLine), "%s", data.timeRemaining);
     }
     const int statusBaseY = scoreY + 8 + 2; // Score height (8px) + 2px gap
-    if (isLive && timeLine[0]) {
+    if (isLive && timeLine[0])
+    {
         const int lineGap = 2;
         const int statusY = statusBaseY;
         const int timeY = statusY + 5 + lineGap;
         int statusW = miniTextWidth(statusLine);
         int statusX = (panelW - statusW) / 2;
-        if (statusX < 0) statusX = 0;
+        if (statusX < 0)
+            statusX = 0;
         drawMiniText(display, statusX, statusY, statusLine, display.color565(180, 200, 255));
         int timeW = miniTextWidth(timeLine);
         int timeX = (panelW - timeW) / 2;
-        if (timeX < 0) timeX = 0;
+        if (timeX < 0)
+            timeX = 0;
         drawMiniText(display, timeX, timeY, timeLine, display.color565(180, 200, 255));
-    } else {
+    }
+    else
+    {
         int statusW = miniTextWidth(statusLine);
         int statusX = (panelW - statusW) / 2;
-        if (statusX < 0) statusX = 0;
-        drawMiniText(display, statusX, statusBaseY, statusLine, display.color565(180, 200, 255));
+        if (statusX < 0)
+            statusX = 0;
+        int yOffset = (strncmp(statusLine, "END", 3) == 0) ? 4 : 0;
+        drawMiniText(display, statusX, statusBaseY + yOffset, statusLine, display.color565(180, 200, 255));
     }
 
     // Toggle SOG display every 15 seconds during live games (but not during PP)
     const bool anyPP = data.awayPP || data.homePP;
-    if (isLive && !anyPP) {
+    if (isLive && !anyPP)
+    {
         unsigned long now = millis();
-        if (now - lastToggleMs >= 15000) {
+        if (now - lastToggleMs >= 15000)
+        {
             showSOG = !showSOG;
             lastToggleMs = now;
         }
-    } else {
+    }
+    else
+    {
         showSOG = false;
         lastToggleMs = millis();
     }
@@ -366,77 +476,91 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     // Team labels under logos
     char awayLine[8];
     char homeLine[8];
-    
+
     int awayNameY = hasAway ? awayLogo.height : 21;
     int homeNameY = hasHome ? homeLogo.height : 21;
-    
-    if (isLive && showSOG && !anyPP) {
+
+    if (isLive && showSOG && !anyPP)
+    {
         // Show SOG on 2 lines: number on top, "SOG" below
         char awaySogNum[8];
         char homeSogNum[8];
         snprintf(awaySogNum, sizeof(awaySogNum), "%u", (unsigned)data.away.sog);
         snprintf(homeSogNum, sizeof(homeSogNum), "%u", (unsigned)data.home.sog);
-        
+
         // Line 1: Number (centered under logo)
         int awayNumW = miniTextWidth(awaySogNum);
         int awayNumX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayNumW) / 2;
-        if (awayNumX < 0) awayNumX = 0;
+        if (awayNumX < 0)
+            awayNumX = 0;
         drawMiniText(display, awayNumX, awayNameY, awaySogNum, display.color565(255, 255, 255));
-        
+
         int homeNumW = miniTextWidth(homeSogNum);
         int homeNumX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeNumW) / 2;
-        if (homeNumX < 0) homeNumX = 0;
+        if (homeNumX < 0)
+            homeNumX = 0;
         drawMiniText(display, homeNumX, homeNameY, homeSogNum, display.color565(255, 255, 255));
-        
+
         // Line 2: "SOG" (centered under logo)
         int awaySogW = miniTextWidth("SOG");
         int awaySogX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awaySogW) / 2;
-        if (awaySogX < 0) awaySogX = 0;
+        if (awaySogX < 0)
+            awaySogX = 0;
         drawMiniText(display, awaySogX, awayNameY + 6, "SOG", display.color565(255, 255, 255));
-        
+
         int homeSogW = miniTextWidth("SOG");
         int homeSogX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeSogW) / 2;
-        if (homeSogX < 0) homeSogX = 0;
+        if (homeSogX < 0)
+            homeSogX = 0;
         drawMiniText(display, homeSogX, homeNameY + 6, "SOG", display.color565(255, 255, 255));
-    } else {
+    }
+    else
+    {
         // Show team abbreviation (centered under logo)
         buildTeamLabel(data.away, awayLine, sizeof(awayLine), 3);
         buildTeamLabel(data.home, homeLine, sizeof(homeLine), 3);
-        
+
         int awayTextW = miniTextWidth(awayLine);
         int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
-        if (awayTextX < 0) awayTextX = 0;
-        
+        if (awayTextX < 0)
+            awayTextX = 0;
+
         int homeTextW = miniTextWidth(homeLine);
         int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
-        if (homeTextX < 0) homeTextX = 0;
-        
+        if (homeTextX < 0)
+            homeTextX = 0;
+
         drawMiniText(display, awayTextX, awayNameY, awayLine, display.color565(255, 255, 255));
         drawMiniText(display, homeTextX, homeNameY, homeLine, display.color565(255, 255, 255));
     }
 
     // PP under team name (only shown when not displaying SOG)
-    if (data.awayPP && !showSOG) {
+    if (data.awayPP && !showSOG)
+    {
         const bool flash = ((millis() / 300) % 2) == 0;
         int ppY = awayNameY + 6;
         int ppW = miniTextWidth("PP");
         int awayTextW = miniTextWidth(awayLine);
         int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
-        if (awayTextX < 0) awayTextX = 0;
+        if (awayTextX < 0)
+            awayTextX = 0;
         int ppX = awayTextX + (awayTextW - ppW) / 2;
-        if (ppX < 0) ppX = 0;
+        if (ppX < 0)
+            ppX = 0;
         drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
     }
-    if (data.homePP && !showSOG) {
+    if (data.homePP && !showSOG)
+    {
         const bool flash = ((millis() / 300) % 2) == 0;
         int ppY = homeNameY + 6;
         int ppW = miniTextWidth("PP");
         int homeTextW = miniTextWidth(homeLine);
         int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
-        if (homeTextX < 0) homeTextX = 0;
+        if (homeTextX < 0)
+            homeTextX = 0;
         int ppX = homeTextX + (homeTextW - ppW) / 2;
-        if (ppX < 0) ppX = 0;
+        if (ppX < 0)
+            ppX = 0;
         drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
     }
 }
-

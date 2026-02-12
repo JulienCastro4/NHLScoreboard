@@ -11,6 +11,11 @@ namespace {
         return (int)strlen(s) * 6;
     }
 
+    int miniTextWidth(const char* s) {
+        if (!s || !s[0]) return 0;
+        return (int)strlen(s) * 4;
+    }
+
     void drawMiniChar(MatrixPanel_I2S_DMA& display, int x, int y, char c, uint16_t color) {
         const MiniGlyph* g = getMiniGlyph(c);
         for (int row = 0; row < 5; ++row) {
@@ -190,6 +195,46 @@ namespace {
         }
     }
 
+    void drawConfetti(MatrixPanel_I2S_DMA& display, uint32_t t,
+                      uint16_t* colors, int colorCount) {
+        const int w = display.width();
+        const int h = display.height();
+        const int numParticles = 18;
+        uint16_t fallback = display.color565(255, 255, 255);
+        if (!colors || colorCount <= 0) {
+            colors = &fallback;
+            colorCount = 1;
+        }
+        uint32_t rng = 0xDEADBEEFu;
+        for (int i = 0; i < numParticles; ++i) {
+            // Deterministic pseudo-random per particle
+            rng = rng * 1664525u + 1013904223u + (uint32_t)(i * 73);
+            int baseX = (int)(rng % (uint32_t)w);
+            rng = rng * 1664525u + 1013904223u;
+            int speed = 8 + (int)(rng % 15); // pixels per second (8..22)
+            rng = rng * 1664525u + 1013904223u;
+            int startY = -1 - (int)(rng % 10); // start above screen
+            int y = startY + (int)((t * speed) / 1000);
+            // Wrap around
+            int totalTravel = h + 12;
+            y = y % totalTravel;
+            if (y < 0) y += totalTravel;
+            y -= 2; // start slightly above
+            if (y < 0 || y >= h) continue;
+            // Slight horizontal wobble
+            int wobble = (int)((t / 200 + i * 37) % 5) - 2;
+            int x = (baseX + wobble) % w;
+            if (x < 0) x += w;
+            uint16_t col = colors[i % colorCount];
+            if (col == 0) col = fallback;
+            display.drawPixel(x, y, col);
+            // Some particles are 2px for visibility
+            if (i % 3 == 0 && x + 1 < w) {
+                display.drawPixel(x + 1, y, col);
+            }
+        }
+    }
+
     void splitName(const char* full, char* first, size_t firstSize, char* last, size_t lastSize) {
         if (!first || !last || firstSize == 0 || lastSize == 0) return;
         first[0] = '\0';
@@ -215,13 +260,15 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
     const uint32_t elapsed = nowMs;
     const uint32_t phaseGoal = 5000;
     const uint32_t phaseFlash = 900;
-    const uint32_t phaseCenter = 2500;
+    const uint32_t phaseZoom = 800;
+    const uint32_t phaseCenter = 1700;
     const uint32_t phaseName = 8400;
     const uint32_t phaseAssist = 0;
 
     const uint32_t tGoalEnd = phaseGoal;
     const uint32_t tFlashEnd = tGoalEnd + phaseFlash;
-    const uint32_t tCenterEnd = tFlashEnd + phaseCenter;
+    const uint32_t tZoomEnd = tFlashEnd + phaseZoom;
+    const uint32_t tCenterEnd = tZoomEnd + phaseCenter;
     const uint32_t tNameEnd = tCenterEnd + phaseName;
     const uint32_t tAssistEnd = tNameEnd + phaseAssist;
 
@@ -243,14 +290,44 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
 
     if (elapsed < tGoalEnd) {
         const char* msg = "GOAL";
-        int w = textWidth(msg);
-        int x = (display.width() - w) / 2;
-        if (x < 0) x = 0;
-        int y = (display.height() - 8) / 2;
-        display.setCursor(x, y);
-        display.print(msg);
-        drawSiren(display, 4, y - 2, 9, 9, elapsed);
-        drawSiren(display, display.width() - 13, y - 2, 9, 9, elapsed);
+        const int letterCount = 4;
+        const uint32_t letterDelay = 400;
+        const uint32_t revealEnd = letterDelay * letterCount; // 1600ms
+        int totalW = textWidth(msg);
+        int baseX = (display.width() - totalW) / 2;
+        int baseY = (display.height() - 8) / 2;
+
+        // Pulse brightness after reveal
+        uint16_t textColor = display.color565(255, 255, 255);
+        if (elapsed >= revealEnd) {
+            bool bright = ((elapsed / 300) % 2) == 0;
+            textColor = bright ? display.color565(255, 255, 255) : display.color565(120, 120, 120);
+        }
+        display.setTextColor(textColor);
+
+        // Draw each letter with bounce-in
+        for (int i = 0; i < letterCount; ++i) {
+            uint32_t letterStart = (uint32_t)i * letterDelay;
+            if (elapsed < letterStart) continue;
+            uint32_t lt = elapsed - letterStart;
+            int bounceY = 0;
+            if (lt < 100) {
+                bounceY = -4 + (int)((lt * 4) / 100);
+            } else if (lt < 200) {
+                bounceY = (int)(((lt - 100) * 2) / 100);
+            } else if (lt < 300) {
+                bounceY = 2 - (int)(((lt - 200) * 2) / 100);
+            }
+            int lx = baseX + i * 6;
+            int ly = baseY + bounceY;
+            char buf[2] = { msg[i], '\0' };
+            display.setCursor(lx, ly);
+            display.print(buf);
+        }
+
+        int sirenY = baseY - 2;
+        drawSiren(display, 4, sirenY, 9, 9, elapsed);
+        drawSiren(display, display.width() - 13, sirenY, 9, 9, elapsed);
         return;
     }
 
@@ -268,12 +345,26 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
         return;
     }
 
+    if (elapsed < tZoomEnd && hasLogo) {
+        // Zoom-in: scale from 4px to 25px (larger than native 20px)
+        uint32_t zoomT = elapsed - tFlashEnd;
+        const int minSize = 4;
+        const int maxSize = 25;
+        int size = minSize + (int)(((uint32_t)(maxSize - minSize) * zoomT) / phaseZoom);
+        if (size > maxSize) size = maxSize;
+        if (size < minSize) size = minSize;
+        int x = (display.width() - size) / 2;
+        int y = (display.height() - size) / 2;
+        drawLogoScaled(display, logo, x, y, size);
+        return;
+    }
+
     if (elapsed < tCenterEnd && hasLogo) {
-        int x = (display.width() - logo.width) / 2;
-        if (x < 0) x = 0;
-        int y = (display.height() - logo.height) / 2;
-        if (y < 0) y = 0;
-        display.drawRGBBitmap(x, y, logo.pixels, logo.width, logo.height);
+        // Hold at 25x25 zoomed size
+        const int size = 25;
+        int x = (display.width() - size) / 2;
+        int y = (display.height() - size) / 2;
+        drawLogoScaled(display, logo, x, y, size);
         return;
     }
 
@@ -288,8 +379,8 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
         const int width = display.width();
         const int wFirst = textWidth(first);
         const int wLast = textWidth(last);
-        const int yFirst = 4;
-        const int yLast = 14;
+        const int yFirst = 1;
+        const int yLast = 11;
         uint16_t shadow = display.color565(58, 58, 58);
         uint16_t main = display.color565(150, 150, 150);
 
@@ -336,9 +427,71 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
         if (colorCount == 0 && hasLogo) {
             colorCount = logoColorCount(logo, colors, 3);
         }
-        const int bandMinY = max(yLast + 7, display.height() - 10);
-        const int bandMaxY = display.height() - 1;
-        drawBands(display, 0, 0, logo.width, logo.height, colors, colorCount, t, bandMinY, bandMaxY);
+        // const int bandMinY = max(yLast + 7, display.height() - 10);
+        // const int bandMaxY = display.height() - 1;
+        // drawBands(display, 0, 0, logo.width, logo.height, colors, colorCount, t, bandMinY, bandMaxY);
+
+        // Confetti particles in team colors
+        drawConfetti(display, t, colors, colorCount);
+
+        // Assist names (mini font, below scorer)
+        {
+            char a1First[24], a1Last[24];
+            char a2First[24], a2Last[24];
+            splitName(data.goalAssist1, a1First, sizeof(a1First), a1Last, sizeof(a1Last));
+            splitName(data.goalAssist2, a2First, sizeof(a2First), a2Last, sizeof(a2Last));
+            bool hasA1 = a1Last[0] != '\0';
+            bool hasA2 = a2Last[0] != '\0';
+
+            const uint32_t assistStart = firstPhase + lastPhase + 800;
+            const uint32_t assistSlide = 800;
+            uint16_t assistColor = display.color565(120, 120, 120);
+
+            if (t >= assistStart) {
+                uint32_t tA = t - assistStart;
+                if (!hasA1 && !hasA2) {
+                    // Unassisted
+                    const char* uTxt = "UNASSISTED";
+                    int wU = miniTextWidth(uTxt);
+                    int xU = width;
+                    if (tA < assistSlide) {
+                        xU = width - (int)((tA * (width + wU)) / assistSlide);
+                        if (xU < 0) xU = 0;
+                    } else {
+                        xU = 0;
+                    }
+                    drawMiniText(display, xU, 24, uTxt, assistColor);
+                } else if (hasA1 && !hasA2) {
+                    // Single assist
+                    int wA1 = miniTextWidth(a1Last);
+                    int xA1 = width;
+                    if (tA < assistSlide) {
+                        xA1 = width - (int)((tA * (width + wA1)) / assistSlide);
+                        if (xA1 < 0) xA1 = 0;
+                    } else {
+                        xA1 = 0;
+                    }
+                    drawMiniText(display, xA1, 24, a1Last, assistColor);
+                } else {
+                    // Two assists — both slide simultaneously
+                    int wA1 = miniTextWidth(a1Last);
+                    int wA2 = miniTextWidth(a2Last);
+                    int xA1 = width;
+                    int xA2 = width;
+                    if (tA < assistSlide) {
+                        xA1 = width - (int)((tA * (width + wA1)) / assistSlide);
+                        if (xA1 < 0) xA1 = 0;
+                        xA2 = width - (int)((tA * (width + wA2)) / assistSlide);
+                        if (xA2 < 0) xA2 = 0;
+                    } else {
+                        xA1 = 0;
+                        xA2 = 0;
+                    }
+                    drawMiniText(display, xA1, 21, a1Last, assistColor);
+                    drawMiniText(display, xA2, 27, a2Last, assistColor);
+                }
+            }
+        }
 
         if (first[0]) {
             if (shadowOn) {
