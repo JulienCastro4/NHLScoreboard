@@ -14,8 +14,8 @@
 // CONSTANTS
 // ============================================================================
 static const char* NHL_PBP_URL_FMT = "https://api-web.nhle.com/v1/gamecenter/%u/play-by-play";
-static const unsigned long PBP_MIN_INTERVAL_MS = 10000;
-static const unsigned long PBP_FAIL_BACKOFF_MS = 20000;
+static const unsigned long PBP_MIN_INTERVAL_MS = 5000;
+static const unsigned long PBP_FAIL_BACKOFF_MS = 5000;
 static const int PBP_MAX_RETRIES = 3;
 static const unsigned long PBP_RETRY_BASE_MS = 1000;
 

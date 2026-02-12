@@ -12,7 +12,8 @@ from PIL import Image, ImageEnhance
 
 
 STANDINGS_URL_FMT = "https://api-web.nhle.com/v1/standings/{date}"
-SIZE = 20
+LOGO_WIDTH = 25
+LOGO_HEIGHT = 20
 
 
 def quantize_channel(value, bits):
@@ -181,7 +182,7 @@ def svg_to_png_bytes(svg_bytes, size):
 def fetch_logo_image(logo_url):
     clean_url = normalize_logo_url(logo_url)
     svg_bytes = fetch_bytes(clean_url)
-    png_bytes = svg_to_png_bytes(svg_bytes, SIZE)
+    png_bytes = svg_to_png_bytes(svg_bytes, LOGO_WIDTH)
     return Image.open(BytesIO(png_bytes)).convert("RGBA")
 
 
@@ -246,7 +247,7 @@ def main():
         try:
             logo_url = dark_logo_url(logo_url)
             img_rgba = fetch_logo_image(logo_url)
-            img_rgba = img_rgba.resize((SIZE, SIZE), Image.LANCZOS)
+            img_rgba = img_rgba.resize((LOGO_WIDTH, LOGO_HEIGHT), Image.LANCZOS)
             img_rgb = rgba_to_rgb(img_rgba)
             
             # Améliorer l'image AVANT quantization
@@ -275,8 +276,8 @@ def main():
                 "logo_url": logo_url,
                 "rgb565": os.path.basename(rgb565_path),
                 "preview_png": os.path.basename(png_path),
-                "width": SIZE,
-                "height": SIZE,
+                "width": LOGO_WIDTH,
+                "height": LOGO_HEIGHT,
             }
         )
 

@@ -32,13 +32,20 @@ namespace {
         entry.height = 0;
     }
 
-    bool sizeFromFile(size_t bytes, uint8_t& sizeOut) {
+    bool sizeFromFile(size_t bytes, uint8_t& widthOut, uint8_t& heightOut) {
+        if (bytes == 25 * 20 * 2) {
+            widthOut = 25;
+            heightOut = 20;
+            return true;
+        }
         if (bytes == 20 * 20 * 2) {
-            sizeOut = 20;
+            widthOut = 20;
+            heightOut = 20;
             return true;
         }
         if (bytes == 25 * 25 * 2) {
-            sizeOut = 25;
+            widthOut = 25;
+            heightOut = 25;
             return true;
         }
         return false;
@@ -77,13 +84,13 @@ namespace {
         if (!f) return false;
 
         size_t sizeBytes = f.size();
-        uint8_t logoSize = 0;
-        if (!sizeFromFile(sizeBytes, logoSize)) {
+        uint8_t logoW = 0, logoH = 0;
+        if (!sizeFromFile(sizeBytes, logoW, logoH)) {
             f.close();
             return false;
         }
 
-        size_t pixelCount = (size_t)logoSize * (size_t)logoSize;
+        size_t pixelCount = (size_t)logoW * (size_t)logoH;
         uint16_t* data = (uint16_t*)malloc(pixelCount * sizeof(uint16_t));
         if (!data) {
             f.close();
@@ -105,8 +112,8 @@ namespace {
         f.close();
         clearEntry(entry);
         entry.pixels = data;
-        entry.width = logoSize;
-        entry.height = logoSize;
+        entry.width = logoW;
+        entry.height = logoH;
         return true;
     }
 
