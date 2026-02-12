@@ -31,8 +31,7 @@ INTERNATIONAL_TEAMS = [
     "USA",  # United States
 ]
 
-LOGO_WIDTH = 25
-LOGO_HEIGHT = 20
+SIZE = 20
 
 
 def quantize_channel(value, bits):
@@ -194,7 +193,7 @@ def main():
             
             try:
                 img_rgba = fetch_logo_image(logo_url)
-                img_rgba = img_rgba.resize((LOGO_WIDTH, LOGO_HEIGHT), Image.LANCZOS)
+                img_rgba = img_rgba.resize((SIZE, SIZE), Image.LANCZOS)
                 img_rgb = rgba_to_rgb(img_rgba)
                 
                 # Améliorer l'image AVANT quantization
@@ -225,8 +224,8 @@ def main():
                     "logo_url": logo_url,
                     "rgb565": os.path.basename(rgb565_path),
                     "preview_png": os.path.basename(png_path),
-                    "width": LOGO_WIDTH,
-                    "height": LOGO_HEIGHT,
+                    "width": SIZE,
+                    "height": SIZE,
                 }
             )
 

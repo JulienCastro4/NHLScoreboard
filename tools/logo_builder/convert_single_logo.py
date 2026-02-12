@@ -78,7 +78,7 @@ def main():
     parser = argparse.ArgumentParser(description="Convertir une image en RGB565 pour le scoreboard")
     parser.add_argument("input", help="Fichier image d'entrée (PNG, JPG, etc.)")
     parser.add_argument("--output", "-o", help="Fichier de sortie .rgb565 (défaut: même nom que l'entrée)")
-    parser.add_argument("--width", "-w", type=int, default=25, help="Largeur cible (défaut: 25)")
+    parser.add_argument("--width", "-w", type=int, default=20, help="Largeur cible (défaut: 20)")
     parser.add_argument("--height", "-H", type=int, default=20, help="Hauteur cible (défaut: 20)")
     parser.add_argument("--no-resize", action="store_true", help="Ne pas redimensionner l'image")
     parser.add_argument("--depth", type=int, default=4, help="Profondeur de couleur en bits par canal (défaut: 4)")

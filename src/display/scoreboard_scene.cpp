@@ -294,7 +294,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
     }
 
     int awayLogoX = 0;
-    int homeLogoX = panelW - 25;
+    int homeLogoX = panelW - 20;
     display.drawRGBBitmap(0, 0, awayLogo.pixels, awayLogo.width, awayLogo.height);
     int homeX = panelW - homeLogo.width;
     if (homeX < 0) homeX = 0;
@@ -370,23 +370,23 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
         
         // Line 1: Number (centered under logo)
         int awayNumW = miniTextWidth(awaySogNum);
-        int awayNumX = awayLogoX + ((hasAway ? awayLogo.width : 25) - awayNumW) / 2;
+        int awayNumX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayNumW) / 2;
         if (awayNumX < 0) awayNumX = 0;
         drawMiniText(display, awayNumX, awayNameY, awaySogNum, display.color565(255, 255, 255));
         
         int homeNumW = miniTextWidth(homeSogNum);
-        int homeNumX = homeLogoX + ((hasHome ? homeLogo.width : 25) - homeNumW) / 2;
+        int homeNumX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeNumW) / 2;
         if (homeNumX < 0) homeNumX = 0;
         drawMiniText(display, homeNumX, homeNameY, homeSogNum, display.color565(255, 255, 255));
         
         // Line 2: "SOG" (centered under logo)
         int awaySogW = miniTextWidth("SOG");
-        int awaySogX = awayLogoX + ((hasAway ? awayLogo.width : 25) - awaySogW) / 2;
+        int awaySogX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awaySogW) / 2;
         if (awaySogX < 0) awaySogX = 0;
         drawMiniText(display, awaySogX, awayNameY + 6, "SOG", display.color565(255, 255, 255));
         
         int homeSogW = miniTextWidth("SOG");
-        int homeSogX = homeLogoX + ((hasHome ? homeLogo.width : 25) - homeSogW) / 2;
+        int homeSogX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeSogW) / 2;
         if (homeSogX < 0) homeSogX = 0;
         drawMiniText(display, homeSogX, homeNameY + 6, "SOG", display.color565(255, 255, 255));
     } else {
@@ -395,11 +395,11 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
         buildTeamLabel(data.home, homeLine, sizeof(homeLine), 3);
         
         int awayTextW = miniTextWidth(awayLine);
-        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 25) - awayTextW) / 2;
+        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
         if (awayTextX < 0) awayTextX = 0;
         
         int homeTextW = miniTextWidth(homeLine);
-        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 25) - homeTextW) / 2;
+        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
         if (homeTextX < 0) homeTextX = 0;
         
         drawMiniText(display, awayTextX, awayNameY, awayLine, display.color565(255, 255, 255));
@@ -412,7 +412,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
         int ppY = awayNameY + 6;
         int ppW = miniTextWidth("PP");
         int awayTextW = miniTextWidth(awayLine);
-        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 25) - awayTextW) / 2;
+        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
         if (awayTextX < 0) awayTextX = 0;
         int ppX = awayTextX + (awayTextW - ppW) / 2;
         if (ppX < 0) ppX = 0;
@@ -423,7 +423,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& d
         int ppY = homeNameY + 6;
         int ppW = miniTextWidth("PP");
         int homeTextW = miniTextWidth(homeLine);
-        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 25) - homeTextW) / 2;
+        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
         if (homeTextX < 0) homeTextX = 0;
         int ppX = homeTextX + (homeTextW - ppW) / 2;
         if (ppX < 0) ppX = 0;
