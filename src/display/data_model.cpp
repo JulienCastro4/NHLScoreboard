@@ -72,11 +72,10 @@ void dataModelUpdateFromScheduleGame(JsonObjectConst game) {
     if (gameId == 0) return;
 
     xSemaphoreTake(dataModelMutex, portMAX_DELAY);
-    if (current.gameId != 0 && current.gameId != gameId) {
+    if (current.gameId != gameId) {
         xSemaphoreGive(dataModelMutex);
         return;
     }
-    current.gameId = gameId;
     copyStr(current.gameState, sizeof(current.gameState), game["gameState"] | "");
 
     JsonObjectConst away = game["away"];
@@ -129,11 +128,10 @@ void dataModelUpdateFromPbp(uint32_t gameId,
     bool homePP) {
     if (!dataModelMutex || gameId == 0) return;
     xSemaphoreTake(dataModelMutex, portMAX_DELAY);
-    if (current.gameId != 0 && current.gameId != gameId) {
+    if (current.gameId != gameId) {
         xSemaphoreGive(dataModelMutex);
         return;
     }
-    current.gameId = gameId;
     copyStr(current.gameState, sizeof(current.gameState), gameState);
     copyStr(current.startTimeUtc, sizeof(current.startTimeUtc), startTimeUtc);
     copyStr(current.utcOffset, sizeof(current.utcOffset), utcOffset);
