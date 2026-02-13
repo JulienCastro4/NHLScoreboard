@@ -144,7 +144,7 @@ def fetch_logo_image(logo_url):
 # Image processing pipeline
 # ============================================================================
 
-def process_logo(img_rgba, args):
+def process_logo(img_rgba, args, team_abbrev=None):
     """Process a logo image through the selected pipeline."""
     if args.legacy:
         img_rgba = img_rgba.resize((SIZE, SIZE), Image.LANCZOS)
@@ -164,6 +164,7 @@ def process_logo(img_rgba, args):
             saturation=args.saturation,
             sharpness=args.sharpness,
             dither=args.dither,
+            team_abbrev=team_abbrev,
         )
 
 
@@ -251,7 +252,7 @@ def main():
             try:
                 logo_url = dark_logo_url(logo_url)
                 img_rgba = fetch_logo_image(logo_url)
-                img_rgb = process_logo(img_rgba, args)
+                img_rgb = process_logo(img_rgba, args, team_abbrev=abbrev)
             except Exception as exc:
                 print(f"[skip] {abbrev}: {exc}")
                 continue
@@ -286,7 +287,7 @@ def main():
             logo_url = f"https://assets.nhle.com/logos/ntl/svg/{team_code}_dark.svg"
             try:
                 img_rgba = fetch_logo_image(logo_url)
-                img_rgb = process_logo(img_rgba, args)
+                img_rgb = process_logo(img_rgba, args, team_abbrev=team_code)
             except Exception as exc:
                 print(f"[skip] {team_code} (intl): {exc}")
                 continue
@@ -324,10 +325,6 @@ def main():
     # ---- Deploy to data/logos ----
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_logos_dir = os.path.normpath(os.path.join(script_dir, "..", "..", "data", "logos"))
-
-    if os.path.exists(data_logos_dir):
-        shutil.rmtree(data_logos_dir)
-        print(f"[clean] Removed {data_logos_dir}")
 
     os.makedirs(data_logos_dir, exist_ok=True)
 

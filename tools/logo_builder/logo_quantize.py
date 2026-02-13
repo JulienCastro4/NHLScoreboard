@@ -212,14 +212,105 @@ def rgba_to_rgb(image):
     return background
 
 
+# ============================================================================
+# Per-team color corrections
+# ============================================================================
+
+# "red"         = cast any pink/orange artifact to pure red
+# "orange"      = cast pink to orange (kill B only, keep G)
+# "green_boost" = boost dark green pixels so they don't vanish to black
+TEAM_COLOR_FIXES = {
+    # International
+    "SVK": "red", "LAT": "red", "ITA": "red", "DEN": "red",
+    "SUI": "red", "FRA": "red", "CAN": "red", "USA": "red", "CZE": "red",
+    # NHL - red
+    "NJD": "red", "WSH": "red", "SEA": "red", "WPG": "red",
+    "CBJ": "red", "MTL": "red",
+    "FLA": "red", "CAR": "red", "NYR": "red", "MIN": "red",
+    # NHL - orange
+    "PHI": "orange", "NYI": "orange", "EDM": "orange",
+    # NHL - green boost
+    "DAL": "green_boost",
+}
+
+
+def _apply_pre_quant_fix(img_rgb, team_abbrev):
+    """Pre-quantization fix applied on the downscaled image BEFORE palette matching."""
+    rule = TEAM_COLOR_FIXES.get(team_abbrev)
+    if not rule:
+        return img_rgb
+    # No pre-quant fixes currently active
+    return img_rgb
+
+
+def _apply_post_quant_fix(img_rgb, team_abbrev):
+    """Post-quantization fix applied on the quantized image."""
+    rule = TEAM_COLOR_FIXES.get(team_abbrev)
+    if not rule:
+        return img_rgb
+
+    arr = np.array(img_rgb, dtype=np.uint8)
+    r = arr[:, :, 0].astype(np.int16)
+    g = arr[:, :, 1].astype(np.int16)
+    b = arr[:, :, 2].astype(np.int16)
+
+    # White boundary: if min(R,G,B) >= 150, the pixel is close to white.
+    # Force these to pure white instead of casting to team color.
+    min_ch = np.minimum(np.minimum(r, g), b)
+    near_white = min_ch >= 150
+
+    if rule == "red":
+        # R-dominant warm pixels -> pure red. Protects white and black.
+        warm = (r >= 70) & ((r - g) > 15) & ((r - b) > 15)
+        # Cast to red only if NOT near-white
+        mask = warm & ~near_white
+        arr[:, :, 1][mask] = 0  # kill G
+        arr[:, :, 2][mask] = 0  # kill B
+        # Force near-white warm pixels to pure white
+        white_mask = warm & near_white
+        arr[:, :, 0][white_mask] = 255
+        arr[:, :, 1][white_mask] = 255
+        arr[:, :, 2][white_mask] = 255
+
+    elif rule == "orange":
+        # Only kill blue (pink -> orange/red), keep green for orange tones
+        pink = (r >= 80) & (b >= 40) & (r > b)
+        # Cast to orange only if NOT near-white
+        mask = pink & ~near_white
+        arr[:, :, 2][mask] = 0  # kill B only
+        # Force near-white pink pixels to pure white
+        white_mask = pink & near_white
+        arr[:, :, 0][white_mask] = 255
+        arr[:, :, 1][white_mask] = 255
+        arr[:, :, 2][white_mask] = 255
+
+    elif rule == "green_boost":
+        # DAL: green pixels are too dim after CIE LUT on hardware.
+        # Use the exact same palette green that ITA (Italy flag) gets — that one works.
+        # Quantize ITA flag green (0,146,70) through the hardware palette to find it.
+        palette_input, palette_lab, tree = _get_palette()
+        ref_green = np.array([[[0, 146, 70]]], dtype=np.float64) / 255.0
+        ref_lab = rgb2lab(ref_green).reshape(3)
+        _, idx = tree.query(ref_lab)
+        ita_green = palette_input[idx]  # exact RGB that ITA's green maps to
+
+        not_black = (r + g + b) > 15
+        is_green = (g >= r) & (g >= b) & not_black & ~near_white
+        arr[:, :, 0][is_green] = ita_green[0]
+        arr[:, :, 1][is_green] = ita_green[1]
+        arr[:, :, 2][is_green] = ita_green[2]
+
+    return Image.fromarray(arr, "RGB")
+
+
+# ============================================================================
+# Main pipeline
+# ============================================================================
+
 def process_logo_perceptual(img_rgba, target_size=20,
                             contrast=1.2, saturation=1.3, sharpness=1.1,
-                            dither=False):
+                            dither=False, team_abbrev=None):
     """Full pipeline: RGBA logo -> quantized RGB for 4-bit HUB75 display.
-
-    1. Enhance at high resolution (before downscale)
-    2. Downscale with BOX filter (area-averaging, no ringing)
-    3. Quantize to hardware palette in CIELAB space
 
     Args:
         img_rgba: RGBA PIL Image (high resolution from SVG rasterization)
@@ -228,6 +319,7 @@ def process_logo_perceptual(img_rgba, target_size=20,
         saturation: Color saturation enhancement (default 1.3)
         sharpness: Sharpness enhancement (default 1.1)
         dither: Enable soft Floyd-Steinberg dithering (default False)
+        team_abbrev: Team abbreviation for per-team color fixes (optional)
 
     Returns:
         RGB PIL Image, target_size x target_size, quantized to hardware palette
@@ -242,8 +334,18 @@ def process_logo_perceptual(img_rgba, target_size=20,
     # 2. Downscale with BOX filter (area-averaging, no color bleeding)
     img_small = img_rgb.resize((target_size, target_size), Image.BOX)
 
-    # 3. Perceptual quantization to hardware palette
+    # 3. Pre-quantization team fix (e.g. DAL green boost)
+    if team_abbrev:
+        img_small = _apply_pre_quant_fix(img_small, team_abbrev)
+
+    # 4. Perceptual quantization to hardware palette
     if dither:
-        return quantize_perceptual_dithered(img_small)
+        img_result = quantize_perceptual_dithered(img_small)
     else:
-        return quantize_perceptual(img_small)
+        img_result = quantize_perceptual(img_small)
+
+    # 5. Post-quantization team fix (e.g. pink->red)
+    if team_abbrev:
+        img_result = _apply_post_quant_fix(img_result, team_abbrev)
+
+    return img_result
