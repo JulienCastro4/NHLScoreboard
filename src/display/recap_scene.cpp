@@ -386,7 +386,7 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
                 (unsigned)data.away.sog, (unsigned)data.home.sog);
             int sogW = miniTextWidth(sogLine);
             int sogX = (w - sogW) / 2 + xOffset;
-            drawMiniText(display, sogX, 13, sogLine, display.color565(255, 255, 255));
+            drawMiniText(display, sogX, 12, sogLine, display.color565(255, 255, 255));
             return;
         }
 
