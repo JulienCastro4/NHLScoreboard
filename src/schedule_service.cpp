@@ -185,19 +185,6 @@ static DeserializationError fetchAndParseJson(JsonDocument& doc, JsonDocument& f
     return err;
 }
 
-static JsonObject findTargetDay(JsonArray gamesByDate, const char* focusedDate) {
-    if (focusedDate && focusedDate[0]) {
-        for (JsonObject day : gamesByDate) {
-            const char* date = day["date"] | "";
-            if (strcmp(date, focusedDate) == 0) {
-                return day;
-            }
-        }
-    }
-    // Fallback to first day
-    return gamesByDate[0];
-}
-
 // ============================================================================
 // MAIN FETCH & PROCESS
 // ============================================================================
@@ -241,32 +228,26 @@ static bool fetchScheduleOnce() {
         Serial.printf("[schedule] firstDate=%s\n", firstDate);
     }
     
-    // Find target day (focused or first)
-    JsonObject targetDay = findTargetDay(gamesByDate, focusedDate);
-    if (targetDay.isNull()) {
-        Serial.println("[schedule] no target day found");
-        state.lastFailMs = millis();
-        return false;
-    }
-    
-    const char* targetDate = targetDay["date"] | "?";
-    JsonArray games = targetDay["games"];
-    
-    Serial.printf("[schedule] targetDate=%s games=%u\n",
-        targetDate, (unsigned)games.size());
-    
-    // Build output
+    // Build output with ALL days
     JsonDocument out;
+    out["focusedDate"] = focusedDate;
     JsonArray outGames = out["games"].to<JsonArray>();
-    
-    for (JsonObject game : games) {
-        JsonObject outGame = outGames.add<JsonObject>();
-        buildGameJson(outGame, game, targetDate);
+    unsigned totalGames = 0;
+
+    for (JsonObject day : gamesByDate) {
+        const char* date = day["date"] | "?";
+        JsonArray games = day["games"];
+        for (JsonObject game : games) {
+            JsonObject outGame = outGames.add<JsonObject>();
+            buildGameJson(outGame, game, date);
+            totalGames++;
+        }
     }
-    
-    Serial.printf("[schedule] focused=%s games=%u\n",
-        focusedDate[0] ? focusedDate : "(empty)", 
-        (unsigned)games.size());
+
+    Serial.printf("[schedule] focused=%s days=%u games=%u\n",
+        focusedDate[0] ? focusedDate : "(empty)",
+        (unsigned)gamesByDate.size(),
+        totalGames);
     
     serializeJson(out, state.lastGoodResponse);
     state.lastFetchMs = millis();

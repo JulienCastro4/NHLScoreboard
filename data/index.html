@@ -253,11 +253,25 @@
       opacity: 0.7;
     }
     .date-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
       margin-top: 0.4rem;
-      margin-bottom: 0.4rem;
-      color: #cbd;
-      font-size: 1.05rem;
+      margin-bottom: 0.8rem;
     }
+    .btn-date {
+      background: #333;
+      color: #0f0;
+      border: 1px solid #555;
+      font-size: 1.4rem;
+      padding: 0.2rem 0.7rem;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .btn-date:hover { background: #444; }
+    .btn-date:disabled { opacity: 0.3; cursor: default; }
+    #date-label { font-size: 1.1rem; color: #ccc; min-width: 120px; text-align: center; }
     .match-body {
       display: flex;
       flex-direction: column;
@@ -299,7 +313,11 @@
 
   <div class="block">
     <label>Select a game for the scoreboard</label>
-    <div id="date-bar" class="date-bar"></div>
+    <div id="date-bar" class="date-bar">
+      <button id="date-prev" class="btn-date" type="button" disabled>&lsaquo;</button>
+      <span id="date-label">Loading...</span>
+      <button id="date-next" class="btn-date" type="button" disabled>&rsaquo;</button>
+    </div>
     <div id="games-list" class="games-list" aria-live="polite"></div>
   </div>
 
@@ -307,10 +325,16 @@
     const status = document.getElementById('status');
     const list = document.getElementById('games-list');
     const dateBar = document.getElementById('date-bar');
+    const datePrev = document.getElementById('date-prev');
+    const dateNext = document.getElementById('date-next');
+    const dateLabelEl = document.getElementById('date-label');
     let gamesCache = [];
     let selectedId = 0;
     let lastScheduleUpdatedTs = '';
     let displayEnabled = true;
+    let allDates = [];
+    let viewDateIndex = 0;
+    let focusedDate = '';
 
     function setStatus(msg, cls) {
       status.textContent = msg;
@@ -369,17 +393,29 @@
       return hh + ':' + mm;
     }
 
+    function updateDateNav() {
+      if (allDates.length === 0) {
+        dateLabelEl.textContent = 'No games';
+        datePrev.disabled = true;
+        dateNext.disabled = true;
+        return;
+      }
+      if (viewDateIndex < 0) viewDateIndex = 0;
+      if (viewDateIndex >= allDates.length) viewDateIndex = allDates.length - 1;
+      const currentDate = allDates[viewDateIndex];
+      dateLabelEl.textContent = (currentDate === focusedDate) ? "TODAY" : currentDate;
+      datePrev.disabled = (viewDateIndex === 0);
+      dateNext.disabled = (viewDateIndex >= allDates.length - 1);
+    }
+
     function renderGames() {
       list.innerHTML = '';
-      if (!gamesCache.length) {
-        dateBar.textContent = '';
-      } else {
-        const dates = Array.from(new Set(gamesCache.map(g => g.date).filter(Boolean)));
-        if (dates.length === 1) dateBar.textContent = 'Date: ' + dates[0];
-        else dateBar.textContent = 'Dates: ' + dates[0] + ' → ' + dates[dates.length - 1] + ' (' + dates.length + ' days)';
-      }
+      updateDateNav();
 
-      gamesCache.forEach(g => {
+      const viewDate = allDates[viewDateIndex] || '';
+      const filtered = viewDate ? gamesCache.filter(g => g.date === viewDate) : gamesCache;
+
+      filtered.forEach(g => {
         const card = document.createElement('div');
         card.className = 'game-card' + (selectedId === g.id ? ' selected' : '');
         const away = g.away || {};
@@ -394,7 +430,12 @@
         let statusLabel = state;
         let showStartLine = true;
         if (stateUpper === 'FUT' || stateUpper === 'PRE') {
-          statusLabel = 'Game starts at ' + time;
+          let dateStr = '';
+          if (g.date && g.date !== focusedDate) {
+            const parts = g.date.split('-');
+            if (parts.length === 3) dateStr = ' \u00b7 ' + parts[2] + '-' + parts[1];
+          }
+          statusLabel = 'Game starts at ' + time
           showStartLine = false;
         } else if (isFinal) {
           statusLabel = 'FINAL';
@@ -478,7 +519,19 @@
         const games = data.games || data;
         if (!Array.isArray(games)) throw new Error('Unexpected format');
 
+        focusedDate = data.focusedDate || '';
         gamesCache = games;
+        const newDates = [...new Set(games.map(g => g.date).filter(Boolean))].sort();
+        const prevDate = allDates[viewDateIndex] || '';
+        allDates = newDates;
+        // Keep current view date if still exists, otherwise default to today
+        if (prevDate && allDates.includes(prevDate)) {
+          viewDateIndex = allDates.indexOf(prevDate);
+        } else if (focusedDate && allDates.includes(focusedDate)) {
+          viewDateIndex = allDates.indexOf(focusedDate);
+        } else {
+          viewDateIndex = 0;
+        }
         renderGames();
         const hasSelected = selectedId !== 0;
         if (!hasSelected) {
@@ -601,6 +654,12 @@
 
     document.getElementById('display-toggle')?.addEventListener('click', toggleDisplay);
     document.getElementById('preview-goal')?.addEventListener('click', previewGoal);
+    datePrev.addEventListener('click', () => {
+      if (viewDateIndex > 0) { viewDateIndex--; renderGames(); }
+    });
+    dateNext.addEventListener('click', () => {
+      if (viewDateIndex < allDates.length - 1) { viewDateIndex++; renderGames(); }
+    });
     setInterval(loadSchedule, 30000);
   </script>
 </body>

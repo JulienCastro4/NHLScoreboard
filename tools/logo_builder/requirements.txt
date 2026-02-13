@@ -7,4 +7,9 @@ requests>=2.31.0
 Pillow>=10.0.0
 
 # SVG to PNG rasterization
-resvg-py>=0.3.0
+resvg-py>=0.2.6
+
+# Perceptual color quantization (logo_quantize.py)
+numpy>=1.24.0
+scikit-image>=0.21.0
+scipy>=1.10.0

@@ -14,6 +14,29 @@ from PIL import Image, ImageEnhance
 STANDINGS_URL_FMT = "https://api-web.nhle.com/v1/standings/{date}"
 SIZE = 20
 
+# International teams that appear in NHL international games
+INTERNATIONAL_TEAMS = [
+    "AUT",  # Austria
+    "CAN",  # Canada
+    "CZE",  # Czech Republic / Czechia
+    "DEN",  # Denmark
+    "FIN",  # Finland
+    "FRA",  # France
+    "GER",  # Germany
+    "ITA",  # Italy
+    "LAT",  # Latvia
+    "NOR",  # Norway
+    "RUS",  # Russia
+    "SVK",  # Slovakia
+    "SUI",  # Switzerland
+    "SWE",  # Sweden
+    "USA",  # United States
+]
+
+
+# ============================================================================
+# Legacy quantization (kept for --legacy flag comparison)
+# ============================================================================
 
 def quantize_channel(value, bits):
     if bits >= 8:
@@ -23,41 +46,25 @@ def quantize_channel(value, bits):
 
 
 def enhance_image_for_low_depth(image_rgb, contrast=1.3, saturation=1.4, sharpness=1.2):
-    """Améliore l'image avant quantization pour de meilleurs résultats."""
-    # Augmenter le contraste
     enhancer = ImageEnhance.Contrast(image_rgb)
     image_rgb = enhancer.enhance(contrast)
-    
-    # Augmenter la saturation
     enhancer = ImageEnhance.Color(image_rgb)
     image_rgb = enhancer.enhance(saturation)
-    
-    # Augmenter la netteté
     enhancer = ImageEnhance.Sharpness(image_rgb)
     image_rgb = enhancer.enhance(sharpness)
-    
     return image_rgb
 
 
 def quantize_image_rgb_adaptive(image_rgb, bits, dither=False):
-    """Quantification adaptative qui préserve mieux les couleurs."""
     if bits >= 8:
         return image_rgb
-
-    # Approche 1: Utiliser PIL pour générer une palette optimale
-    # Convertir en palette avec plus de couleurs d'abord pour analyse
-    colors = 2 ** (bits * 3)  # Nombre total de couleurs possibles
+    colors = 2 ** (bits * 3)
     if colors > 256:
         colors = 256
-    
-    # Quantifier avec palette adaptative
     img_p = image_rgb.quantize(colors=colors, method=Image.MEDIANCUT, dither=Image.FLOYDSTEINBERG if dither else Image.NONE)
     img_quantized = img_p.convert('RGB')
-    
-    # Maintenant appliquer la quantification par canal pour correspondre au hardware
     width, height = img_quantized.size
     out = Image.new("RGB", (width, height))
-    
     for y in range(height):
         for x in range(width):
             r, g, b = img_quantized.getpixel((x, y))
@@ -69,64 +76,12 @@ def quantize_image_rgb_adaptive(image_rgb, bits, dither=False):
                     quantize_channel(b, bits),
                 ),
             )
-    
     return out
 
 
-def quantize_image_rgb(image_rgb, bits, dither=False):
-    if bits >= 8:
-        return image_rgb
-
-    width, height = image_rgb.size
-    if not dither:
-        out = Image.new("RGB", (width, height))
-        for y in range(height):
-            for x in range(width):
-                r, g, b = image_rgb.getpixel((x, y))
-                out.putpixel(
-                    (x, y),
-                    (
-                        quantize_channel(r, bits),
-                        quantize_channel(g, bits),
-                        quantize_channel(b, bits),
-                    ),
-                )
-        return out
-
-    # Floyd-Steinberg dithering per channel (small images, pure Python is ok).
-    buf = [
-        [list(image_rgb.getpixel((x, y))) for x in range(width)]
-        for y in range(height)
-    ]
-    for y in range(height):
-        for x in range(width):
-            r, g, b = buf[y][x]
-            qr = quantize_channel(r, bits)
-            qg = quantize_channel(g, bits)
-            qb = quantize_channel(b, bits)
-            err = (r - qr, g - qg, b - qb)
-            buf[y][x] = [qr, qg, qb]
-
-            def add_error(nx, ny, factor):
-                if 0 <= nx < width and 0 <= ny < height:
-                    for c in range(3):
-                        buf[ny][nx][c] = max(
-                            0,
-                            min(255, buf[ny][nx][c] + err[c] * factor),
-                        )
-
-            add_error(x + 1, y, 7 / 16)
-            add_error(x - 1, y + 1, 3 / 16)
-            add_error(x, y + 1, 5 / 16)
-            add_error(x + 1, y + 1, 1 / 16)
-
-    out = Image.new("RGB", (width, height))
-    for y in range(height):
-        for x in range(width):
-            r, g, b = buf[y][x]
-            out.putpixel((x, y), (int(r), int(g), int(b)))
-    return out
-
+# ============================================================================
+# Common helpers
+# ============================================================================
 
 def rgb_to_rgb565_le(r, g, b):
     value = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
@@ -168,7 +123,7 @@ def write_rgb565(path, image_rgb):
                 f.write(rgb_to_rgb565_le(r, g, b))
 
 
-def svg_to_png_bytes(svg_bytes, size):
+def svg_to_png_bytes(svg_bytes):
     try:
         import resvg_py
 
@@ -181,18 +136,49 @@ def svg_to_png_bytes(svg_bytes, size):
 def fetch_logo_image(logo_url):
     clean_url = normalize_logo_url(logo_url)
     svg_bytes = fetch_bytes(clean_url)
-    png_bytes = svg_to_png_bytes(svg_bytes, SIZE)
+    png_bytes = svg_to_png_bytes(svg_bytes)
     return Image.open(BytesIO(png_bytes)).convert("RGBA")
 
 
+# ============================================================================
+# Image processing pipeline
+# ============================================================================
+
+def process_logo(img_rgba, args):
+    """Process a logo image through the selected pipeline."""
+    if args.legacy:
+        img_rgba = img_rgba.resize((SIZE, SIZE), Image.LANCZOS)
+        img_rgb = rgba_to_rgb(img_rgba)
+        img_rgb = enhance_image_for_low_depth(
+            img_rgb, args.contrast, args.saturation, args.sharpness
+        )
+        if args.depth and args.depth > 0:
+            img_rgb = quantize_image_rgb_adaptive(img_rgb, args.depth, args.dither)
+        return img_rgb
+    else:
+        from logo_quantize import process_logo_perceptual
+        return process_logo_perceptual(
+            img_rgba,
+            target_size=SIZE,
+            contrast=args.contrast,
+            saturation=args.saturation,
+            sharpness=args.sharpness,
+            dither=args.dither,
+        )
+
+
+# ============================================================================
+# Main
+# ============================================================================
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--date", default=None, help="YYYY-MM-DD")
+    parser = argparse.ArgumentParser(description="Build NHL and international team logos for scoreboard")
+    parser.add_argument("--date", default=None, help="YYYY-MM-DD for NHL standings")
     parser.add_argument("--out", default="out", help="Output folder")
     parser.add_argument(
         "--depth",
         type=int,
-        default=0,
+        default=4,
         help="Quantize per-channel bit depth (e.g., 4 for 4bpc). 0 = no quantize.",
     )
     parser.add_argument(
@@ -203,20 +189,35 @@ def main():
     parser.add_argument(
         "--contrast",
         type=float,
-        default=1.3,
-        help="Contrast enhancement factor (default: 1.3)",
+        default=1.2,
+        help="Contrast enhancement factor (default: 1.2)",
     )
     parser.add_argument(
         "--saturation",
         type=float,
-        default=1.4,
-        help="Saturation enhancement factor (default: 1.4)",
+        default=1.3,
+        help="Saturation enhancement factor (default: 1.3)",
     )
     parser.add_argument(
         "--sharpness",
         type=float,
-        default=1.2,
-        help="Sharpness enhancement factor (default: 1.2)",
+        default=1.1,
+        help="Sharpness enhancement factor (default: 1.1)",
+    )
+    parser.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Use legacy quantization (uniform channel rounding) instead of perceptual.",
+    )
+    parser.add_argument(
+        "--no-nhl",
+        action="store_true",
+        help="Skip NHL team logos (only build international).",
+    )
+    parser.add_argument(
+        "--no-international",
+        action="store_true",
+        help="Skip international team logos (only build NHL).",
     )
     args = parser.parse_args()
 
@@ -227,85 +228,109 @@ def main():
     out_dir = args.out
     os.makedirs(out_dir, exist_ok=True)
 
-    standings_url = STANDINGS_URL_FMT.format(date=date)
-    data = fetch_json(standings_url)
-    standings = data.get("standings", [])
-
     manifest = []
+    seen_abbrevs = set()
 
-    for entry in standings:
-        abbrev = (
-            entry.get("teamAbbrev", {}).get("default")
-            or entry.get("teamAbbrev")
-            or entry.get("teamCommonName", {}).get("default")
-        )
-        logo_url = entry.get("teamLogo", "")
-        if not abbrev or not logo_url:
-            continue
+    # ---- NHL team logos from standings API ----
+    if not args.no_nhl:
+        print(f"[nhl] Fetching standings for {date}...")
+        standings_url = STANDINGS_URL_FMT.format(date=date)
+        data = fetch_json(standings_url)
+        standings = data.get("standings", [])
 
-        try:
-            logo_url = dark_logo_url(logo_url)
-            img_rgba = fetch_logo_image(logo_url)
-            img_rgba = img_rgba.resize((SIZE, SIZE), Image.LANCZOS)
-            img_rgb = rgba_to_rgb(img_rgba)
-            
-            # Améliorer l'image AVANT quantization
-            img_rgb = enhance_image_for_low_depth(
-                img_rgb, 
-                args.contrast, 
-                args.saturation, 
-                args.sharpness
+        for entry in standings:
+            abbrev = (
+                entry.get("teamAbbrev", {}).get("default")
+                or entry.get("teamAbbrev")
+                or entry.get("teamCommonName", {}).get("default")
             )
-            
-            if args.depth and args.depth > 0:
-                img_rgb = quantize_image_rgb_adaptive(img_rgb, args.depth, args.dither)
-        except Exception as exc:
-            print(f"[skip] {abbrev}: {exc}")
-            continue
+            logo_url = entry.get("teamLogo", "")
+            if not abbrev or not logo_url:
+                continue
 
-        rgb565_path = os.path.join(out_dir, f"{abbrev}.rgb565")
-        png_path = os.path.join(out_dir, f"{abbrev}.png")
+            try:
+                logo_url = dark_logo_url(logo_url)
+                img_rgba = fetch_logo_image(logo_url)
+                img_rgb = process_logo(img_rgba, args)
+            except Exception as exc:
+                print(f"[skip] {abbrev}: {exc}")
+                continue
 
-        write_rgb565(rgb565_path, img_rgb)
-        img_rgb.save(png_path, format="PNG")
+            rgb565_path = os.path.join(out_dir, f"{abbrev}.rgb565")
+            png_path = os.path.join(out_dir, f"{abbrev}.png")
 
-        manifest.append(
-            {
-                "team": abbrev,
-                "logo_url": logo_url,
-                "rgb565": os.path.basename(rgb565_path),
-                "preview_png": os.path.basename(png_path),
-                "width": SIZE,
-                "height": SIZE,
-            }
-        )
+            write_rgb565(rgb565_path, img_rgb)
+            img_rgb.save(png_path, format="PNG")
 
-        print(f"[ok] {abbrev} -> {rgb565_path}")
+            manifest.append(
+                {
+                    "team": abbrev,
+                    "logo_url": logo_url,
+                    "rgb565": os.path.basename(rgb565_path),
+                    "preview_png": os.path.basename(png_path),
+                    "width": SIZE,
+                    "height": SIZE,
+                }
+            )
+            seen_abbrevs.add(abbrev)
+            print(f"[ok] {abbrev} -> {rgb565_path}")
 
+        print(f"[nhl] {len(seen_abbrevs)} NHL logos")
+
+    # ---- International team logos ----
+    if not args.no_international:
+        intl_count = 0
+        for team_code in INTERNATIONAL_TEAMS:
+            if team_code in seen_abbrevs:
+                continue
+            logo_url = f"https://assets.nhle.com/logos/ntl/svg/{team_code}_dark.svg"
+            try:
+                img_rgba = fetch_logo_image(logo_url)
+                img_rgb = process_logo(img_rgba, args)
+            except Exception as exc:
+                print(f"[skip] {team_code} (intl): {exc}")
+                continue
+
+            rgb565_path = os.path.join(out_dir, f"{team_code}.rgb565")
+            png_path = os.path.join(out_dir, f"{team_code}.png")
+
+            write_rgb565(rgb565_path, img_rgb)
+            img_rgb.save(png_path, format="PNG")
+
+            manifest.append(
+                {
+                    "team": team_code,
+                    "type": "international",
+                    "logo_url": logo_url,
+                    "rgb565": os.path.basename(rgb565_path),
+                    "preview_png": os.path.basename(png_path),
+                    "width": SIZE,
+                    "height": SIZE,
+                }
+            )
+            seen_abbrevs.add(team_code)
+            intl_count += 1
+            print(f"[ok] {team_code} (intl) -> {rgb565_path}")
+
+        print(f"[intl] {intl_count} international logos")
+
+    # ---- Write manifest ----
     manifest_path = os.path.join(out_dir, "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
-    print(f"[done] {len(manifest)} logos")
+    print(f"[done] {len(manifest)} total logos")
 
-    # Copier automatiquement vers data/logos
-    data_logos_dir = os.path.join("..", "..", "data", "logos")
-    if os.path.isabs(out_dir):
-        # Si out_dir est absolu, calculer le chemin absolu vers data/logos
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        data_logos_dir = os.path.join(script_dir, "..", "..", "data", "logos")
-    
-    data_logos_dir = os.path.normpath(data_logos_dir)
-    
-    # Supprimer et recréer le dossier data/logos
+    # ---- Deploy to data/logos ----
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_logos_dir = os.path.normpath(os.path.join(script_dir, "..", "..", "data", "logos"))
+
     if os.path.exists(data_logos_dir):
         shutil.rmtree(data_logos_dir)
         print(f"[clean] Removed {data_logos_dir}")
-    
+
     os.makedirs(data_logos_dir, exist_ok=True)
-    print(f"[deploy] Created {data_logos_dir}")
-    
-    # Copier tous les fichiers .rgb565
+
     copied = 0
     for entry in manifest:
         src = os.path.join(out_dir, entry["rgb565"])
@@ -313,7 +338,7 @@ def main():
         if os.path.exists(src):
             shutil.copy2(src, dst)
             copied += 1
-    
+
     print(f"[deploy] Copied {copied} logos to {data_logos_dir}")
 
 

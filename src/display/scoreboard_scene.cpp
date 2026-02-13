@@ -315,6 +315,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     char startTime[8] = {0};
     formatStartTime(data, startTime, sizeof(startTime));
 
+    char dateLabel[6] = {0};
     if (isPre)
     {
         if (isGameSoonToStart(data))
@@ -324,6 +325,36 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         else
         {
             snprintf(statusLine, sizeof(statusLine), "%s", startTime);
+            // Extract DD-MM from startTimeUtc with UTC offset applied
+            if (strlen(data.startTimeUtc) >= 16)
+            {
+                const char *tPos = strchr(data.startTimeUtc, 'T');
+                if (tPos && strlen(tPos) >= 6)
+                {
+                    int utcHH = parseTwo(tPos + 1);
+                    int utcMM = parseTwo(tPos + 4);
+                    int utcDay = parseTwo(data.startTimeUtc + 8);
+                    int utcMonth = parseTwo(data.startTimeUtc + 5);
+                    int utcYear = (data.startTimeUtc[0] - '0') * 1000 +
+                                  (data.startTimeUtc[1] - '0') * 100 +
+                                  (data.startTimeUtc[2] - '0') * 10 +
+                                  (data.startTimeUtc[3] - '0');
+                    if (utcHH >= 0 && utcMM >= 0 && utcDay > 0 && utcMonth > 0)
+                    {
+                        struct tm localTm = {};
+                        localTm.tm_year = utcYear - 1900;
+                        localTm.tm_mon = utcMonth - 1;
+                        localTm.tm_mday = utcDay;
+                        localTm.tm_hour = utcHH;
+                        localTm.tm_min = utcMM + parseOffsetMinutes(data.utcOffset);
+                        localTm.tm_sec = 0;
+                        localTm.tm_isdst = 0;
+                        mktime(&localTm);
+                        snprintf(dateLabel, sizeof(dateLabel), "%02d-%02d",
+                                 localTm.tm_mday, localTm.tm_mon + 1);
+                    }
+                }
+            }
         }
     }
     else if (isFinal)
@@ -454,6 +485,16 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
             statusX = 0;
         int yOffset = (strncmp(statusLine, "END", 3) == 0) ? 4 : 0;
         drawMiniText(display, statusX, statusBaseY + yOffset, statusLine, display.color565(180, 200, 255));
+
+        // Show DD-MM date below start time for upcoming games
+        if (dateLabel[0])
+        {
+            int dateW = miniTextWidth(dateLabel);
+            int dateX = (panelW - dateW) / 2;
+            if (dateX < 0)
+                dateX = 0;
+            drawMiniText(display, dateX, statusBaseY + yOffset + 6, dateLabel, display.color565(140, 160, 200));
+        }
     }
 
     // Toggle SOG display every 15 seconds during live games (but not during PP)
@@ -562,5 +603,32 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         if (ppX < 0)
             ppX = 0;
         drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
+    }
+
+    // Scrolling winner ribbon for FINAL games
+    if (isFinal)
+    {
+        const char *winnerAbbrev = nullptr;
+        if (data.away.score > data.home.score)
+            winnerAbbrev = data.away.abbrev;
+        else if (data.home.score > data.away.score)
+            winnerAbbrev = data.home.abbrev;
+
+        if (winnerAbbrev && winnerAbbrev[0])
+        {
+            char pattern[24];
+            snprintf(pattern, sizeof(pattern), "%s WIN   ", winnerAbbrev);
+            int patternPx = (int)strlen(pattern) * 4;
+            if (patternPx > 0)
+            {
+                int scrollOffset = (int)((millis() / 80) % (unsigned long)patternPx);
+                int ribbonY = display.height() - 6; // 5px text, 1px from bottom
+                uint16_t ribbonColor = display.color565(255, 200, 50);
+                for (int x = -scrollOffset; x < panelW; x += patternPx)
+                {
+                    drawMiniText(display, x, ribbonY, pattern, ribbonColor);
+                }
+            }
+        }
     }
 }
