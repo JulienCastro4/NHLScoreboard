@@ -6,7 +6,10 @@
 #include "display/goal_scene.h"
 #include "display/hub75_pins.h"
 #include "display/logo_cache.h"
+#include "display/recap_scene.h"
 #include "display/scoreboard_scene.h"
+
+#include <strings.h>
 
 namespace {
     constexpr uint16_t PANEL_RES_X = 64;
@@ -18,6 +21,7 @@ namespace {
     MatrixPanel_I2S_DMA* matrix = nullptr;
     ScoreboardScene scene;
     GoalScene goalScene;
+    RecapScene recapScene;
     uint32_t lastFrameMs = 0;
     bool displayReady = false;
     bool displayEnabled = true;
@@ -28,6 +32,14 @@ namespace {
     bool goalAnimActive = false;
     uint32_t goalAnimStartMs = 0;
     uint32_t lastGameId = 0;
+
+    enum class RecapMode {
+        Standard,
+        Recap
+    };
+    RecapMode recapMode = RecapMode::Standard;
+    uint32_t recapModeStartMs = 0;
+    constexpr uint32_t STANDARD_MS = 20000;
 
     void copyStr(char* dest, size_t destSize, const char* src) {
         if (!dest || destSize == 0) return;
@@ -59,6 +71,12 @@ namespace {
         const GameSnapshot& frameSnap = previewActive ? previewSnapshot : goalAnimSnapshot;
         goalScene.render(display, frameSnap, elapsed);
     }
+
+    bool isFinalState(const char* state) {
+        if (!state || !state[0]) return false;
+        return (strcasecmp(state, "FINAL") == 0) || (strcasecmp(state, "OFF") == 0);
+    }
+
 }
 
 void displayInit() {
@@ -134,6 +152,8 @@ void displayTick() {
         lastGameId = snapshot.gameId;
         lastGoalKey[0] = '\0';
         goalAnimActive = false;
+        recapMode = RecapMode::Standard;
+        recapModeStartMs = now;
         logoCacheClear();
     }
     if (snapshot.goalIsNew) {
@@ -146,8 +166,35 @@ void displayTick() {
     }
     if (goalAnimActive) {
         renderGoalOverlay(*matrix, snapshot, now);
-    } else {
-        scene.render(*matrix, snapshot, now);
+        return;
     }
+
+    const bool finalState = isFinalState(snapshot.gameState);
+    const bool recapAvailable = snapshot.recapReady;
+    if (finalState && recapAvailable) {
+        if (recapMode == RecapMode::Standard) {
+            if (now - recapModeStartMs >= STANDARD_MS) {
+                recapMode = RecapMode::Recap;
+                recapModeStartMs = now;
+                recapScene.start(now, snapshot);
+            }
+        }
+
+        if (recapMode == RecapMode::Recap) {
+            recapScene.render(*matrix, snapshot, now);
+            if (recapScene.isComplete(now)) {
+                recapMode = RecapMode::Standard;
+                recapModeStartMs = now;
+            }
+            return;
+        }
+
+        scene.render(*matrix, snapshot, now);
+        return;
+    }
+
+    recapMode = RecapMode::Standard;
+    recapModeStartMs = now;
+    scene.render(*matrix, snapshot, now);
 }
 

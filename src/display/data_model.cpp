@@ -42,6 +42,18 @@ namespace {
         snap.goalPeriod = 0;
         snap.awayPP = false;
         snap.homePP = false;
+        snap.recapReady = false;
+        copyStr(snap.recapText, sizeof(snap.recapText), "");
+        snap.recapGoalCount = 0;
+        for (size_t i = 0; i < kMaxRecapGoals; ++i) {
+            snap.recapGoals[i].eventId = 0;
+            copyStr(snap.recapGoals[i].teamAbbrev, sizeof(snap.recapGoals[i].teamAbbrev), "");
+            copyStr(snap.recapGoals[i].scorer, sizeof(snap.recapGoals[i].scorer), "");
+            copyStr(snap.recapGoals[i].assist1, sizeof(snap.recapGoals[i].assist1), "");
+            copyStr(snap.recapGoals[i].assist2, sizeof(snap.recapGoals[i].assist2), "");
+            copyStr(snap.recapGoals[i].timeRemaining, sizeof(snap.recapGoals[i].timeRemaining), "");
+            snap.recapGoals[i].period = 0;
+        }
     }
 }
 
@@ -125,7 +137,11 @@ void dataModelUpdateFromPbp(uint32_t gameId,
     const char* goalTime,
     uint8_t goalPeriod,
     bool awayPP,
-    bool homePP) {
+    bool homePP,
+    bool recapReady,
+    const char* recapText,
+    uint8_t recapGoalCount,
+    const RecapGoal* recapGoals) {
     if (!dataModelMutex || gameId == 0) return;
     xSemaphoreTake(dataModelMutex, portMAX_DELAY);
     if (current.gameId != gameId) {
@@ -148,16 +164,38 @@ void dataModelUpdateFromPbp(uint32_t gameId,
     copyStr(current.home.name, sizeof(current.home.name), homeName);
     current.home.score = homeScore;
     current.home.sog = homeSog;
-    current.goalIsNew = goalIsNew;
-    current.goalEventId = goalEventId;
-    current.goalOwnerTeamId = goalOwnerTeamId;
-    copyStr(current.goalScorer, sizeof(current.goalScorer), goalScorer);
-    copyStr(current.goalAssist1, sizeof(current.goalAssist1), goalAssist1);
-    copyStr(current.goalAssist2, sizeof(current.goalAssist2), goalAssist2);
-    copyStr(current.goalTime, sizeof(current.goalTime), goalTime);
-    current.goalPeriod = goalPeriod;
+    // Only SET goalIsNew, never clear it — only the display thread clears it
+    // via dataModelClearGoalFlag(). This prevents a subsequent fetch from
+    // overwriting goalIsNew=true before the display thread reads it.
+    if (goalIsNew) {
+        current.goalIsNew = true;
+        current.goalEventId = goalEventId;
+        current.goalOwnerTeamId = goalOwnerTeamId;
+        copyStr(current.goalScorer, sizeof(current.goalScorer), goalScorer);
+        copyStr(current.goalAssist1, sizeof(current.goalAssist1), goalAssist1);
+        copyStr(current.goalAssist2, sizeof(current.goalAssist2), goalAssist2);
+        copyStr(current.goalTime, sizeof(current.goalTime), goalTime);
+        current.goalPeriod = goalPeriod;
+    }
     current.awayPP = awayPP;
     current.homePP = homePP;
+    current.recapReady = recapReady;
+    copyStr(current.recapText, sizeof(current.recapText), recapText);
+    if (recapGoals && recapGoalCount > 0) {
+        if (recapGoalCount > kMaxRecapGoals) recapGoalCount = kMaxRecapGoals;
+        current.recapGoalCount = recapGoalCount;
+        for (size_t i = 0; i < recapGoalCount; ++i) {
+            current.recapGoals[i].eventId = recapGoals[i].eventId;
+            copyStr(current.recapGoals[i].teamAbbrev, sizeof(current.recapGoals[i].teamAbbrev), recapGoals[i].teamAbbrev);
+            copyStr(current.recapGoals[i].scorer, sizeof(current.recapGoals[i].scorer), recapGoals[i].scorer);
+            copyStr(current.recapGoals[i].assist1, sizeof(current.recapGoals[i].assist1), recapGoals[i].assist1);
+            copyStr(current.recapGoals[i].assist2, sizeof(current.recapGoals[i].assist2), recapGoals[i].assist2);
+            copyStr(current.recapGoals[i].timeRemaining, sizeof(current.recapGoals[i].timeRemaining), recapGoals[i].timeRemaining);
+            current.recapGoals[i].period = recapGoals[i].period;
+        }
+    } else {
+        current.recapGoalCount = 0;
+    }
     xSemaphoreGive(dataModelMutex);
 }
 

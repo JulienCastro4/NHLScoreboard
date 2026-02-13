@@ -382,7 +382,7 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
         const int yFirst = 1;
         const int yLast = 11;
         uint16_t shadow = display.color565(58, 58, 58);
-        uint16_t main = display.color565(150, 150, 150);
+        uint16_t main = display.color565(200, 200, 200);
 
         int xFirst = 0;
         if (first[0]) {
@@ -445,7 +445,7 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
 
             const uint32_t assistStart = firstPhase + lastPhase + 800;
             const uint32_t assistSlide = 800;
-            uint16_t assistColor = display.color565(120, 120, 120);
+            uint16_t assistColor = display.color565(200, 200, 200);
 
             if (t >= assistStart) {
                 uint32_t tA = t - assistStart;

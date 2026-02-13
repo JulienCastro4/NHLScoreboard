@@ -11,6 +11,20 @@ struct TeamInfo {
     uint16_t sog;
 };
 
+constexpr size_t kMaxRecapGoals = 24;
+
+struct RecapGoal {
+    uint32_t eventId;
+    char teamAbbrev[4];
+    char scorer[24];
+    char assist1[24];
+    char assist2[24];
+    char timeRemaining[8];
+    uint8_t period;
+};
+
+constexpr size_t kRecapTextMax = 768;
+
 struct GameSnapshot {
     uint32_t gameId;
     char gameState[8];
@@ -31,6 +45,10 @@ struct GameSnapshot {
     char goalAssist2[32];
     bool awayPP;
     bool homePP;
+    bool recapReady;
+    char recapText[kRecapTextMax];
+    uint8_t recapGoalCount;
+    RecapGoal recapGoals[kMaxRecapGoals];
 };
 
 void dataModelInit();
@@ -62,7 +80,11 @@ void dataModelUpdateFromPbp(uint32_t gameId,
     const char* goalTime,
     uint8_t goalPeriod,
     bool awayPP,
-    bool homePP);
+    bool homePP,
+    bool recapReady,
+    const char* recapText,
+    uint8_t recapGoalCount,
+    const RecapGoal* recapGoals);
 bool dataModelGetSnapshot(GameSnapshot& out);
 void dataModelClearGoalFlag();
 

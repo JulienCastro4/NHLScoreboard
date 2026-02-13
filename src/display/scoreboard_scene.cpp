@@ -605,30 +605,4 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
     }
 
-    // Scrolling winner ribbon for FINAL games
-    if (isFinal)
-    {
-        const char *winnerAbbrev = nullptr;
-        if (data.away.score > data.home.score)
-            winnerAbbrev = data.away.abbrev;
-        else if (data.home.score > data.away.score)
-            winnerAbbrev = data.home.abbrev;
-
-        if (winnerAbbrev && winnerAbbrev[0])
-        {
-            char pattern[24];
-            snprintf(pattern, sizeof(pattern), "%s WIN   ", winnerAbbrev);
-            int patternPx = (int)strlen(pattern) * 4;
-            if (patternPx > 0)
-            {
-                int scrollOffset = (int)((millis() / 80) % (unsigned long)patternPx);
-                int ribbonY = display.height() - 6; // 5px text, 1px from bottom
-                uint16_t ribbonColor = display.color565(255, 200, 50);
-                for (int x = -scrollOffset; x < panelW; x += patternPx)
-                {
-                    drawMiniText(display, x, ribbonY, pattern, ribbonColor);
-                }
-            }
-        }
-    }
 }

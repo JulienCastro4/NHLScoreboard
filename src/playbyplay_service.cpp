@@ -5,6 +5,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <freertos/task.h>
+#include <ctype.h>
+#include <strings.h>
 
 #include "api_server.h"
 #include "display/data_model.h"
@@ -121,6 +123,108 @@ static String resolvePlayerName(const char* apiName, int playerId) {
     return String(cached);
 }
 
+static bool isFinalState(const char* state) {
+    if (!state || !state[0]) return false;
+    return (strcasecmp(state, "FINAL") == 0) || (strcasecmp(state, "OFF") == 0);
+}
+
+static bool isAllowedRecapChar(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == ':';
+}
+
+static void sanitizeToken(const char* in, char* out, size_t outSize) {
+    if (!out || outSize == 0) return;
+    out[0] = '\0';
+    if (!in || !in[0]) return;
+    size_t o = 0;
+    bool lastSpace = true;
+    for (size_t i = 0; in[i] && o + 1 < outSize; ++i) {
+        char c = (char)toupper((unsigned char)in[i]);
+        if (!isAllowedRecapChar(c)) c = ' ';
+        if (c == ' ') {
+            if (lastSpace) continue;
+            lastSpace = true;
+        } else {
+            lastSpace = false;
+        }
+        out[o++] = c;
+    }
+    while (o > 0 && out[o - 1] == ' ') {
+        --o;
+    }
+    out[o] = '\0';
+}
+
+static void extractLastName(const char* fullName, char* out, size_t outSize) {
+    if (!out || outSize == 0) return;
+    out[0] = '\0';
+    if (!fullName || !fullName[0]) return;
+    const char* last = fullName;
+    for (const char* p = fullName; *p; ++p) {
+        if (*p == ' ') last = p + 1;
+    }
+    strncpy(out, last, outSize - 1);
+    out[outSize - 1] = '\0';
+}
+
+static const char* teamAbbrevForId(int teamId, int awayId, const char* awayAbbrev, int homeId, const char* homeAbbrev) {
+    if (teamId == awayId) return awayAbbrev;
+    if (teamId == homeId) return homeAbbrev;
+    return "";
+}
+
+static void copyRecapName(const String& fullName, char* out, size_t outSize) {
+    char lastName[32];
+    extractLastName(fullName.c_str(), lastName, sizeof(lastName));
+    sanitizeToken(lastName, out, outSize);
+}
+
+static uint8_t buildRecapGoals(JsonDocument& doc,
+    const char* awayAbbrev,
+    const char* homeAbbrev,
+    RecapGoal* outGoals,
+    uint8_t maxGoals) {
+    if (!outGoals || maxGoals == 0) return 0;
+
+    JsonArray plays = doc["plays"];
+    uint8_t goalCount = 0;
+    for (JsonObject play : plays) {
+        const char* type = play["typeDescKey"] | "";
+        if (strcasecmp(type, "goal") != 0) continue;
+        if (goalCount >= maxGoals) break;
+
+        RecapGoal& g = outGoals[goalCount];
+        g.eventId = play["eventId"] | 0;
+        const int teamId = play["details"]["eventOwnerTeamId"] | 0;
+        const char* teamAbbrev = teamAbbrevForId(teamId,
+            (int)(doc["awayTeam"]["id"] | 0), awayAbbrev,
+            (int)(doc["homeTeam"]["id"] | 0), homeAbbrev);
+        sanitizeToken(teamAbbrev, g.teamAbbrev, sizeof(g.teamAbbrev));
+
+        String scorerName = resolvePlayerName(
+            play["details"]["scoringPlayerName"]["default"] | "",
+            play["details"]["scoringPlayerId"] | 0);
+        copyRecapName(scorerName, g.scorer, sizeof(g.scorer));
+
+        String assist1 = resolvePlayerName(
+            play["details"]["assist1PlayerName"]["default"] | "",
+            play["details"]["assist1PlayerId"] | 0);
+        copyRecapName(assist1, g.assist1, sizeof(g.assist1));
+
+        String assist2 = resolvePlayerName(
+            play["details"]["assist2PlayerName"]["default"] | "",
+            play["details"]["assist2PlayerId"] | 0);
+        copyRecapName(assist2, g.assist2, sizeof(g.assist2));
+
+        sanitizeToken(play["timeRemaining"] | "", g.timeRemaining, sizeof(g.timeRemaining));
+        g.period = play["periodDescriptor"]["number"] | 0;
+
+        goalCount++;
+    }
+
+    return goalCount;
+}
+
 static void parseGoalEvent(JsonObject play, GoalInfo& goal) {
     goal.isNew = true;
     goal.type = play["typeDescKey"] | "";
@@ -195,7 +299,6 @@ static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
         }
     }
     
-    state.lastPlaySortOrder = lastSortOrder;
     state.lastPlaySortOrder = lastSortOrder;
 }
 
@@ -395,25 +498,49 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
             goal.eventId);
     }
 
+    const char* gameState = doc["gameState"] | "";
+    const uint8_t period = doc["periodDescriptor"]["number"] | 0;
+    const uint32_t awayId = doc["awayTeam"]["id"] | 0;
+    const uint32_t homeId = doc["homeTeam"]["id"] | 0;
+    const char* awayAbbrev = doc["awayTeam"]["abbrev"] | "";
+    const char* homeAbbrev = doc["homeTeam"]["abbrev"] | "";
+    const uint16_t awayScore = doc["awayTeam"]["score"] | 0;
+    const uint16_t homeScore = doc["homeTeam"]["score"] | 0;
+    const uint16_t awaySog = doc["awayTeam"]["sog"] | 0;
+    const uint16_t homeSog = doc["homeTeam"]["sog"] | 0;
+
+    bool recapReady = false;
+    char recapText[kRecapTextMax] = {0};
+    RecapGoal recapGoals[kMaxRecapGoals] = {};
+    uint8_t recapGoalCount = 0;
+    if (isFinalState(gameState)) {
+        recapReady = true;
+        recapGoalCount = buildRecapGoals(doc,
+            awayAbbrev,
+            homeAbbrev,
+            recapGoals,
+            kMaxRecapGoals);
+    }
+
     // Update data model
     dataModelUpdateFromPbp(
         gameId,
-        doc["gameState"] | "",
+        gameState,
         doc["startTimeUTC"] | "",
         utcOffset,
-        doc["periodDescriptor"]["number"] | 0,
+        period,
         doc["clock"]["timeRemaining"] | "",
         doc["clock"]["inIntermission"] | false,
-        doc["awayTeam"]["id"] | 0,
-        doc["awayTeam"]["abbrev"] | "",
+        awayId,
+        awayAbbrev,
         awayName,
-        doc["awayTeam"]["score"] | 0,
-        doc["awayTeam"]["sog"] | 0,
-        doc["homeTeam"]["id"] | 0,
-        doc["homeTeam"]["abbrev"] | "",
+        awayScore,
+        awaySog,
+        homeId,
+        homeAbbrev,
         homeName,
-        doc["homeTeam"]["score"] | 0,
-        doc["homeTeam"]["sog"] | 0,
+        homeScore,
+        homeSog,
         goal.isNew,
         (uint32_t)goal.eventId,
         (uint32_t)goal.ownerTeamId,
@@ -423,7 +550,11 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
         goal.time.c_str(),
         (uint8_t)goal.period,
         awayPP,
-        homePP
+        homePP,
+        recapReady,
+        recapText,
+        recapGoalCount,
+        recapGoals
     );
 
     // Build API response
