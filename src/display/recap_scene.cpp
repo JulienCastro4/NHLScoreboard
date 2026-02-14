@@ -86,7 +86,7 @@ namespace {
         if (!abbrev || !abbrev[0]) return;
         int textW = miniTextWidth(abbrev);
         int textX = x + (size - textW) / 2 + 1;
-        int textY = y + size + 2;
+        int textY = y + size;
         drawMiniText(display, textX, textY, abbrev, color);
     }
 
@@ -340,11 +340,11 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             const bool hasAway = logoCacheGet(data.away.abbrev, awayLogo);
             const bool hasHome = logoCacheGet(data.home.abbrev, homeLogo);
             if (hasAway) {
-                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 4, 18,
+                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 4, 20,
                     display.color565(255, 255, 255));
             }
             if (hasHome) {
-                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 19, 4, 18,
+                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 21, 4, 20,
                     display.color565(255, 255, 255));
             }
 
@@ -373,11 +373,11 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             const bool hasAway = logoCacheGet(data.away.abbrev, awayLogo);
             const bool hasHome = logoCacheGet(data.home.abbrev, homeLogo);
             if (hasAway) {
-                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 4, 18,
+                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 4, 20,
                     display.color565(255, 255, 255));
             }
             if (hasHome) {
-                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 19, 4, 18,
+                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 21, 4, 20,
                     display.color565(255, 255, 255));
             }
 
@@ -395,8 +395,8 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             LogoBitmap logo{};
             const bool hasLogo = logoCacheGet(team.abbrev, logo);
             if (hasLogo) {
-                int lx = xOffset + (w - 18) / 2;
-                drawLogoScaled(display, logo, lx, 2, 18);
+                int lx = xOffset + (w - 20) / 2;
+                drawLogoScaled(display, logo, lx, 2, 20);
             }
             const int abbrevY = hasLogo ? 22 : 10;
             int abbrevW = miniTextWidth(team.abbrev);

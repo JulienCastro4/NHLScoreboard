@@ -260,8 +260,10 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
     const uint32_t elapsed = nowMs;
     const uint32_t phaseGoal = 5000;
     const uint32_t phaseFlash = 900;
-    const uint32_t phaseZoom = 800;
-    const uint32_t phaseCenter = 1700;
+    const uint32_t phaseZoom = 600;
+    const uint32_t phaseCenter = 300;
+    const uint32_t phaseAbbrev = 1000;
+    const uint32_t phaseSwipe = 350;
     const uint32_t phaseName = 8400;
     const uint32_t phaseAssist = 0;
 
@@ -269,7 +271,9 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
     const uint32_t tFlashEnd = tGoalEnd + phaseFlash;
     const uint32_t tZoomEnd = tFlashEnd + phaseZoom;
     const uint32_t tCenterEnd = tZoomEnd + phaseCenter;
-    const uint32_t tNameEnd = tCenterEnd + phaseName;
+    const uint32_t tAbbrevEnd = tCenterEnd + phaseAbbrev;
+    const uint32_t tSwipeEnd = tAbbrevEnd + phaseSwipe;
+    const uint32_t tNameEnd = tSwipeEnd + phaseName;
     const uint32_t tAssistEnd = tNameEnd + phaseAssist;
 
     display.clearScreen();
@@ -346,10 +350,10 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
     }
 
     if (elapsed < tZoomEnd && hasLogo) {
-        // Zoom-in: scale from 4px to 25px (larger than native 20px)
+        // Zoom-in: scale from 4px to 20px
         uint32_t zoomT = elapsed - tFlashEnd;
         const int minSize = 4;
-        const int maxSize = 25;
+        const int maxSize = 20;
         int size = minSize + (int)(((uint32_t)(maxSize - minSize) * zoomT) / phaseZoom);
         if (size > maxSize) size = maxSize;
         if (size < minSize) size = minSize;
@@ -360,11 +364,62 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
     }
 
     if (elapsed < tCenterEnd && hasLogo) {
-        // Hold at 25x25 zoomed size
-        const int size = 25;
+        // Hold at 20x20 zoomed size
+        const int size = 20;
         int x = (display.width() - size) / 2;
         int y = (display.height() - size) / 2;
         drawLogoScaled(display, logo, x, y, size);
+        return;
+    }
+
+    if (elapsed < tAbbrevEnd && hasLogo) {
+        // Display logo at 20x20 and animate abbrev with bounce-in
+        const int size = 20;
+        int x = (display.width() - size) / 2;
+        int y = (display.height() - size) / 2;
+        drawLogoScaled(display, logo, x, y, size);
+        
+        // Draw abbrev with bounce effect (letter by letter like GOAL)
+        uint32_t abbrevT = elapsed - tCenterEnd;
+        const uint32_t letterDelay = 200;
+        const int abbrevLen = strlen(goalTeamAbbrev);
+        const int abbrevW = miniTextWidth(goalTeamAbbrev);
+        const int abbrevX = (display.width() - abbrevW) / 2;
+        const int abbrevY = (display.height() - size) / 2 + size;
+        
+        for (int i = 0; i < abbrevLen; ++i) {
+            uint32_t letterStart = (uint32_t)i * letterDelay;
+            if (abbrevT < letterStart) continue;
+            uint32_t lt = abbrevT - letterStart;
+            int bounceY = 0;
+            if (lt < 80) {
+                bounceY = -3 + (int)((lt * 3) / 80);
+            } else if (lt < 160) {
+                bounceY = (int)(((lt - 80) * 2) / 80);
+            } else if (lt < 240) {
+                bounceY = 2 - (int)(((lt - 160) * 2) / 80);
+            }
+            int lx = abbrevX + i * 4;
+            int ly = abbrevY + bounceY;
+            char buf[2] = { goalTeamAbbrev[i], '\0' };
+            drawMiniChar(display, lx, ly, buf[0], display.color565(255, 255, 255));
+        }
+        return;
+    }
+
+    if (elapsed < tSwipeEnd && hasLogo) {
+        // Swipe transition: logo slides out left, scorer slides in from right
+        uint32_t swipeT = elapsed - tAbbrevEnd;
+        const int size = 20;
+        int baseX = (display.width() - size) / 2;
+        int baseY = (display.height() - size) / 2;
+        
+        // Slide logo out to the left
+        int logoX = baseX - (int)((swipeT * (display.width() + size)) / phaseSwipe);
+        int logoY = baseY;
+        if (logoX >= -size && logoX < display.width()) {
+            drawLogoScaled(display, logo, logoX, logoY, size);
+        }
         return;
     }
 
@@ -372,7 +427,7 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
     char last[24];
     splitName(data.goalScorer, first, sizeof(first), last, sizeof(last));
     if (elapsed < tNameEnd) {
-        uint32_t t = elapsed - tCenterEnd;
+        uint32_t t = elapsed - tSwipeEnd;
         const uint32_t firstPhase = 1200;
         const uint32_t lastPhase = 1200;
         const uint32_t holdPhase = 5000;
