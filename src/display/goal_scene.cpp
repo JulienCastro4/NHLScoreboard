@@ -439,25 +439,25 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
         uint16_t shadow = display.color565(58, 58, 58);
         uint16_t main = display.color565(200, 200, 200);
 
-        int xFirst = 0;
+        int xFirst = 1;
         if (first[0]) {
             if (t < firstPhase) {
-                xFirst = width - (int)((t * (width + wFirst)) / firstPhase);
-                if (xFirst < 0) xFirst = 0;
+                xFirst = width - (int)((t * (width + wFirst)) / firstPhase) + 1;
+                if (xFirst < 1) xFirst = 1;
             }
         }
 
-        int xLast = 0; // No offset
+        int xLast = 1;
         if (last[0]) {
             if (t < firstPhase) {
                 xLast = width;
             } else {
                 uint32_t tLast = t - firstPhase;
                 if (tLast < lastPhase) {
-                    xLast = width - (int)((tLast * (width + wLast)) / lastPhase);
-                    if (xLast < 0) xLast = 0;
+                    xLast = width - (int)((tLast * (width + wLast)) / lastPhase) + 1;
+                    if (xLast < 1) xLast = 1;
                 } else {
-                    xLast = 0;
+                    xLast = 1;
                 }
             }
         }
@@ -510,10 +510,10 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
                     int wU = miniTextWidth(uTxt);
                     int xU = width;
                     if (tA < assistSlide) {
-                        xU = width - (int)((tA * (width + wU)) / assistSlide);
-                        if (xU < 0) xU = 0;
+                        xU = width - (int)((tA * (width + wU)) / assistSlide) + 1;
+                        if (xU < 1) xU = 1;
                     } else {
-                        xU = 0;
+                        xU = 1;
                     }
                     drawMiniText(display, xU, 24, uTxt, assistColor);
                 } else if (hasA1 && !hasA2) {
@@ -521,10 +521,10 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
                     int wA1 = miniTextWidth(a1Last);
                     int xA1 = width;
                     if (tA < assistSlide) {
-                        xA1 = width - (int)((tA * (width + wA1)) / assistSlide);
-                        if (xA1 < 0) xA1 = 0;
+                        xA1 = width - (int)((tA * (width + wA1)) / assistSlide) + 1;
+                        if (xA1 < 1) xA1 = 1;
                     } else {
-                        xA1 = 0;
+                        xA1 = 1;
                     }
                     drawMiniText(display, xA1, 24, a1Last, assistColor);
                 } else {
@@ -534,13 +534,13 @@ void GoalScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, u
                     int xA1 = width;
                     int xA2 = width;
                     if (tA < assistSlide) {
-                        xA1 = width - (int)((tA * (width + wA1)) / assistSlide);
-                        if (xA1 < 0) xA1 = 0;
-                        xA2 = width - (int)((tA * (width + wA2)) / assistSlide);
-                        if (xA2 < 0) xA2 = 0;
+                        xA1 = width - (int)((tA * (width + wA1)) / assistSlide) + 1;
+                        if (xA1 < 1) xA1 = 1;
+                        xA2 = width - (int)((tA * (width + wA2)) / assistSlide) + 1;
+                        if (xA2 < 1) xA2 = 1;
                     } else {
-                        xA1 = 0;
-                        xA2 = 0;
+                        xA1 = 1;
+                        xA2 = 1;
                     }
                     drawMiniText(display, xA1, 21, a1Last, assistColor);
                     drawMiniText(display, xA2, 27, a2Last, assistColor);

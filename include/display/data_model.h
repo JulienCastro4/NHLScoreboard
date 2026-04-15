@@ -25,6 +25,18 @@ struct RecapGoal {
 
 constexpr size_t kRecapTextMax = 768;
 
+constexpr size_t kMaxGoalQueue = 8;
+
+struct GoalQueueEntry {
+    uint32_t eventId;
+    uint32_t ownerTeamId;
+    char scorer[32];
+    char assist1[32];
+    char assist2[32];
+    char time[8];
+    uint8_t period;
+};
+
 struct GameSnapshot {
     uint32_t gameId;
     char gameState[8];
@@ -87,4 +99,7 @@ void dataModelUpdateFromPbp(uint32_t gameId,
     const RecapGoal* recapGoals);
 bool dataModelGetSnapshot(GameSnapshot& out);
 void dataModelClearGoalFlag();
+void dataModelPushGoal(const GoalQueueEntry& goal);
+bool dataModelPopGoal(GoalQueueEntry& out);
+uint8_t dataModelGoalQueueSize();
 

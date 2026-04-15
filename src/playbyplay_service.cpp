@@ -264,19 +264,8 @@ static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
     JsonObject lastPlay = plays[lastIdx];
     const int lastSortOrder = lastPlay["sortOrder"] | 0;
 
-    // Prime on first fetch
+    // Prime on first fetch — just set watermark, don't queue old goals
     if (!state.primed) {
-        // If we previously got empty plays, the game just started —
-        // check if any of these first plays are goals
-        if (state.hadEmptyFetch) {
-            for (JsonObject play : plays) {
-                const char* type = play["typeDescKey"] | "";
-                if (String(type).equalsIgnoreCase("goal")) {
-                    parseGoalEvent(play, goal);
-                    break;
-                }
-            }
-        }
         state.lastPlaySortOrder = lastSortOrder;
         state.primed = true;
         return;
@@ -287,15 +276,29 @@ static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
         return;
     }
     
-    // Check for new goal events
+    // Check for ALL new goal events (not just the first)
     for (JsonObject play : plays) {
         const int sortOrder = play["sortOrder"] | 0;
         if (sortOrder <= state.lastPlaySortOrder) continue;
         
         const char* type = play["typeDescKey"] | "";
         if (String(type).equalsIgnoreCase("goal")) {
-            parseGoalEvent(play, goal);
-            break; // Only process first new goal
+            GoalInfo g = {};
+            parseGoalEvent(play, g);
+            // Push each goal to the queue
+            GoalQueueEntry entry{};
+            entry.eventId = (uint32_t)g.eventId;
+            entry.ownerTeamId = (uint32_t)g.ownerTeamId;
+            strncpy(entry.scorer, g.scoringPlayerName.c_str(), sizeof(entry.scorer) - 1);
+            strncpy(entry.assist1, g.assist1Name.c_str(), sizeof(entry.assist1) - 1);
+            strncpy(entry.assist2, g.assist2Name.c_str(), sizeof(entry.assist2) - 1);
+            strncpy(entry.time, g.time.c_str(), sizeof(entry.time) - 1);
+            entry.period = (uint8_t)g.period;
+            dataModelPushGoal(entry);
+            Serial.printf("[pbp] GOAL queued: scorer='%s' a1='%s' a2='%s' eventId=%d\n",
+                entry.scorer, entry.assist1, entry.assist2, g.eventId);
+            // Keep track of last goal for the legacy single-goal field
+            goal = g;
         }
     }
     
@@ -485,18 +488,10 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
         homePP = String(situation["homeTeam"]["situationDescriptions"][0] | "").equalsIgnoreCase("PP");
     }
 
-    // Detect new goals
+    // Detect new goals (pushed to queue directly)
     GoalInfo goal = {};
     JsonArray plays = doc["plays"];
     detectNewGoals(plays, goal);
-
-    if (goal.isNew) {
-        Serial.printf("[pbp] GOAL detected: scorer='%s' a1='%s' a2='%s' eventId=%d\n",
-            goal.scoringPlayerName.c_str(),
-            goal.assist1Name.c_str(),
-            goal.assist2Name.c_str(),
-            goal.eventId);
-    }
 
     const char* gameState = doc["gameState"] | "";
     const uint8_t period = doc["periodDescriptor"]["number"] | 0;
@@ -522,7 +517,7 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
             kMaxRecapGoals);
     }
 
-    // Update data model
+    // Update data model (goals are queued separately, not via goalIsNew)
     dataModelUpdateFromPbp(
         gameId,
         gameState,
@@ -541,14 +536,14 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
         homeName,
         homeScore,
         homeSog,
-        goal.isNew,
-        (uint32_t)goal.eventId,
-        (uint32_t)goal.ownerTeamId,
-        goal.scoringPlayerName.c_str(),
-        goal.assist1Name.c_str(),
-        goal.assist2Name.c_str(),
-        goal.time.c_str(),
-        (uint8_t)goal.period,
+        false, // goalIsNew — goals now go through the queue
+        0,
+        0,
+        "",
+        "",
+        "",
+        "",
+        0,
         awayPP,
         homePP,
         recapReady,

@@ -9,5 +9,7 @@ public:
 private:
     unsigned long lastToggleMs = 0;
     bool showSOG = false;
+    int logoSlideY = 0;
+    unsigned long lastSlideMs = 0;
 };
 

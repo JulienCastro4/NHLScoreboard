@@ -340,11 +340,11 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             const bool hasAway = logoCacheGet(data.away.abbrev, awayLogo);
             const bool hasHome = logoCacheGet(data.home.abbrev, homeLogo);
             if (hasAway) {
-                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 4, 20,
+                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 2, 20,
                     display.color565(255, 255, 255));
             }
             if (hasHome) {
-                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 21, 4, 20,
+                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 21, 2, 20,
                     display.color565(255, 255, 255));
             }
 
@@ -355,14 +355,14 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             display.setTextColor(display.color565(255, 255, 255));
             int scoreW = (int)strlen(scoreLine) * 6;
             int scoreX = (w - scoreW) / 2 + xOffset;
-            display.setCursor(scoreX, 11);
+            display.setCursor(scoreX, 9);
             display.print(scoreLine);
 
             if (data.period > 3) {
                 const char* extra = (data.period >= 5) ? "SO" : "OT";
                 int extraW = miniTextWidth(extra);
                 int extraX = (w - extraW) / 2 + xOffset;
-                drawMiniText(display, extraX, 20, extra, display.color565(180, 200, 255));
+                drawMiniText(display, extraX, 18, extra, display.color565(180, 200, 255));
             }
             return;
         }
@@ -373,11 +373,11 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             const bool hasAway = logoCacheGet(data.away.abbrev, awayLogo);
             const bool hasHome = logoCacheGet(data.home.abbrev, homeLogo);
             if (hasAway) {
-                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 4, 20,
+                drawLogoWithAbbrev(display, awayLogo, data.away.abbrev, xOffset + 0, 2, 20,
                     display.color565(255, 255, 255));
             }
             if (hasHome) {
-                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 21, 4, 20,
+                drawLogoWithAbbrev(display, homeLogo, data.home.abbrev, xOffset + w - 21, 2, 20,
                     display.color565(255, 255, 255));
             }
 
@@ -386,7 +386,7 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
                 (unsigned)data.away.sog, (unsigned)data.home.sog);
             int sogW = miniTextWidth(sogLine);
             int sogX = (w - sogW) / 2 + xOffset;
-            drawMiniText(display, sogX, 12, sogLine, display.color565(255, 255, 255));
+            drawMiniText(display, sogX, 10, sogLine, display.color565(255, 255, 255));
             return;
         }
 
@@ -428,10 +428,10 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             char timeClamped[16];
             clampLine(timeLine, timeClamped, sizeof(timeClamped));
 
-            int y1 = 2;
-            int y2 = 9;
-            int y3 = 16;
-            int y4 = 23;
+            int y1 = 3;
+            int y2 = 10;
+            int y3 = 17;
+            int y4 = 24;
             drawMiniText(display, (w - miniTextWidth(scorer)) / 2 + xOffset, y1, scorer, display.color565(255, 255, 255));
             drawMiniText(display, (w - miniTextWidth(a1Clamped)) / 2 + xOffset, y2, a1Clamped, display.color565(200, 200, 200));
             drawMiniText(display, (w - miniTextWidth(a2Clamped)) / 2 + xOffset, y3, a2Clamped, display.color565(200, 200, 200));

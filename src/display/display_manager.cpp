@@ -164,6 +164,30 @@ void displayTick() {
             dataModelClearGoalFlag();
         }
     }
+    // Check goal queue for pending animations
+    if (!goalAnimActive) {
+        GoalQueueEntry entry{};
+        if (dataModelPopGoal(entry)) {
+            // Fill goal fields into snapshot for the animation
+            goalAnimSnapshot = snapshot;
+            goalAnimSnapshot.goalIsNew = true;
+            goalAnimSnapshot.goalEventId = entry.eventId;
+            goalAnimSnapshot.goalOwnerTeamId = entry.ownerTeamId;
+            copyStr(goalAnimSnapshot.goalScorer, sizeof(goalAnimSnapshot.goalScorer), entry.scorer);
+            copyStr(goalAnimSnapshot.goalAssist1, sizeof(goalAnimSnapshot.goalAssist1), entry.assist1);
+            copyStr(goalAnimSnapshot.goalAssist2, sizeof(goalAnimSnapshot.goalAssist2), entry.assist2);
+            copyStr(goalAnimSnapshot.goalTime, sizeof(goalAnimSnapshot.goalTime), entry.time);
+            goalAnimSnapshot.goalPeriod = entry.period;
+            char key[64];
+            snprintf(key, sizeof(key), "%u|%u", (unsigned)snapshot.gameId, (unsigned)entry.eventId);
+            strncpy(lastGoalKey, key, sizeof(lastGoalKey) - 1);
+            lastGoalKey[sizeof(lastGoalKey) - 1] = '\0';
+            goalAnimActive = true;
+            goalAnimStartMs = now;
+            Serial.printf("[display] goal anim start: scorer='%s' eventId=%u (queue remaining=%u)\n",
+                entry.scorer, (unsigned)entry.eventId, (unsigned)dataModelGoalQueueSize());
+        }
+    }
     if (goalAnimActive) {
         renderGoalOverlay(*matrix, snapshot, now);
         return;

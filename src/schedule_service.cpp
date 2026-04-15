@@ -7,6 +7,7 @@
 #include <freertos/task.h>
 
 #include "api_server.h"
+#include "display/data_model.h"
 #include "prefix_stream.h"
 
 // ============================================================================
@@ -256,6 +257,43 @@ static bool fetchScheduleOnce() {
     Serial.printf("[schedule] fetch ok bytes=%u\n", 
         (unsigned)state.lastGoodResponse.length());
     return true;
+}
+
+bool scheduleServicePrimeSelectedGame(uint32_t gameId) {
+    if (gameId == 0 || state.lastGoodResponse.isEmpty()) {
+        return false;
+    }
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, state.lastGoodResponse);
+    if (err) {
+        Serial.printf("[schedule] prime parse failed: %s\n", err.c_str());
+        return false;
+    }
+
+    JsonArray games = doc["games"];
+    if (games.isNull()) {
+        return false;
+    }
+
+    for (JsonObject game : games) {
+        if ((game["id"] | 0) != gameId) {
+            continue;
+        }
+
+        const char* gameState = game["gameState"] | "";
+        if (strcasecmp(gameState, "FINAL") == 0 || strcasecmp(gameState, "OFF") == 0) {
+            Serial.printf("[schedule] skip priming final game=%u\n", (unsigned)gameId);
+            return false;
+        }
+
+        dataModelUpdateFromScheduleGame(game);
+        Serial.printf("[schedule] primed selected game=%u from cache\n", (unsigned)gameId);
+        return true;
+    }
+
+    Serial.printf("[schedule] selected game=%u not found in cache\n", (unsigned)gameId);
+    return false;
 }
 
 // ============================================================================

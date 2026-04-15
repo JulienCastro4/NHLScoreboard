@@ -310,6 +310,9 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     const bool isPre = (strcasecmp(state, "PRE") == 0 || strcasecmp(state, "FUT") == 0);
     const bool isFinal = (strcasecmp(state, "OFF") == 0 || strcasecmp(state, "FINAL") == 0);
     const bool isLive = (strcasecmp(state, "LIVE") == 0 || strcasecmp(state, "CRIT") == 0);
+    const bool clockExpired = (data.period > 0 && isClockExpired(data.timeRemaining));
+    const bool hasStarted = (data.period > 0) || data.away.score > 0 || data.home.score > 0;
+    const bool isEndOfPeriodState = !isPre && !isFinal && hasStarted && (data.inIntermission || clockExpired);
 
     char statusLine[32] = {0};
     char startTime[8] = {0};
@@ -361,9 +364,9 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     {
         snprintf(statusLine, sizeof(statusLine), "FINAL");
     }
-    else if (isLive)
+    else if (isLive || isEndOfPeriodState)
     {
-        if (data.inIntermission || (data.period > 0 && isClockExpired(data.timeRemaining)))
+        if (isEndOfPeriodState)
         {
             if (data.period == 1)
             {
@@ -410,6 +413,22 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
 
     const int panelW = display.width();
 
+    // Text offset: +2px for PRE/FINAL, 0 for live
+    const int sceneOffsetY = (isPre || isFinal) ? 2 : 0;
+
+    // Logo base: +2px down; slides 2px more up when showing SOG
+    const int logoBaseY = 2;
+    {
+        const int slideTarget = (showSOG && isLive) ? -2 : 0;
+        unsigned long now = millis();
+        if (logoSlideY != slideTarget && (now - lastSlideMs >= 60)) {
+            if (logoSlideY < slideTarget) logoSlideY++;
+            else if (logoSlideY > slideTarget) logoSlideY--;
+            lastSlideMs = now;
+        }
+    }
+    const int logoYOffset = logoBaseY + logoSlideY;
+
     // Logos
     LogoBitmap awayLogo{};
     LogoBitmap homeLogo{};
@@ -431,11 +450,11 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
 
     int awayLogoX = 0;
     int homeLogoX = panelW - 20;
-    display.drawRGBBitmap(0, 0, awayLogo.pixels, awayLogo.width, awayLogo.height);
+    display.drawRGBBitmap(0, logoYOffset, awayLogo.pixels, awayLogo.width, awayLogo.height);
     int homeX = panelW - homeLogo.width;
     if (homeX < 0)
         homeX = 0;
-    display.drawRGBBitmap(homeX, 0, homeLogo.pixels, homeLogo.width, homeLogo.height);
+    display.drawRGBBitmap(homeX, logoYOffset, homeLogo.pixels, homeLogo.width, homeLogo.height);
     homeLogoX = homeX;
 
     // Scores centered between logos (vertically and horizontally)
@@ -449,14 +468,14 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     if (scoreX < 0)
         scoreX = 0;
     const int logoHeight = hasAway ? awayLogo.height : 20;
-    const int scoreY = (logoHeight - 8) / 2; // Center vertically in logos (text height = 8px)
+    const int scoreY = (logoHeight - 8) / 2 + sceneOffsetY; // Center vertically (fixed, doesn't slide)
     display.setCursor(scoreX, scoreY);
     display.print(scoreLine);
 
     // Center status (period/time or start time) - 2px below score
     display.setTextSize(1);
     char timeLine[16] = {0};
-    if (isLive && data.timeRemaining[0] && !data.inIntermission && !isClockExpired(data.timeRemaining))
+    if (isLive && data.timeRemaining[0] && !data.inIntermission && !clockExpired)
     {
         snprintf(timeLine, sizeof(timeLine), "%s", data.timeRemaining);
     }
@@ -518,8 +537,8 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     char awayLine[8];
     char homeLine[8];
 
-    int awayNameY = hasAway ? awayLogo.height : 21;
-    int homeNameY = hasHome ? homeLogo.height : 21;
+    int awayNameY = (hasAway ? awayLogo.height : 21) + logoYOffset;
+    int homeNameY = (hasHome ? homeLogo.height : 21) + logoYOffset;
 
     if (isLive && showSOG && !anyPP)
     {
@@ -557,52 +576,47 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     }
     else
     {
-        // Show team abbreviation (centered under logo)
+        // Show team abbreviation or flashing PP
         buildTeamLabel(data.away, awayLine, sizeof(awayLine), 3);
         buildTeamLabel(data.home, homeLine, sizeof(homeLine), 3);
 
-        int awayTextW = miniTextWidth(awayLine);
-        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
-        if (awayTextX < 0)
-            awayTextX = 0;
-
-        int homeTextW = miniTextWidth(homeLine);
-        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
-        if (homeTextX < 0)
-            homeTextX = 0;
-
-        drawMiniText(display, awayTextX, awayNameY, awayLine, display.color565(255, 255, 255));
-        drawMiniText(display, homeTextX, homeNameY, homeLine, display.color565(255, 255, 255));
-    }
-
-    // PP under team name (only shown when not displaying SOG)
-    if (data.awayPP && !showSOG)
-    {
         const bool flash = ((millis() / 300) % 2) == 0;
-        int ppY = awayNameY + 6;
-        int ppW = miniTextWidth("PP");
-        int awayTextW = miniTextWidth(awayLine);
-        int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
-        if (awayTextX < 0)
-            awayTextX = 0;
-        int ppX = awayTextX + (awayTextW - ppW) / 2;
-        if (ppX < 0)
-            ppX = 0;
-        drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
-    }
-    if (data.homePP && !showSOG)
-    {
-        const bool flash = ((millis() / 300) % 2) == 0;
-        int ppY = homeNameY + 6;
-        int ppW = miniTextWidth("PP");
-        int homeTextW = miniTextWidth(homeLine);
-        int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
-        if (homeTextX < 0)
-            homeTextX = 0;
-        int ppX = homeTextX + (homeTextW - ppW) / 2;
-        if (ppX < 0)
-            ppX = 0;
-        drawMiniText(display, ppX, ppY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
+
+        // Away label: show flashing PP if away is on power play, else abbreviation
+        if (data.awayPP)
+        {
+            int ppW = miniTextWidth("PP");
+            int ppX = awayLogoX + ((hasAway ? awayLogo.width : 20) - ppW) / 2;
+            if (ppX < 0)
+                ppX = 0;
+            drawMiniText(display, ppX, awayNameY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
+        }
+        else
+        {
+            int awayTextW = miniTextWidth(awayLine);
+            int awayTextX = awayLogoX + ((hasAway ? awayLogo.width : 20) - awayTextW) / 2;
+            if (awayTextX < 0)
+                awayTextX = 0;
+            drawMiniText(display, awayTextX, awayNameY, awayLine, display.color565(255, 255, 255));
+        }
+
+        // Home label: show flashing PP if home is on power play, else abbreviation
+        if (data.homePP)
+        {
+            int ppW = miniTextWidth("PP");
+            int ppX = homeLogoX + ((hasHome ? homeLogo.width : 20) - ppW) / 2;
+            if (ppX < 0)
+                ppX = 0;
+            drawMiniText(display, ppX, homeNameY, "PP", flash ? display.color565(255, 80, 80) : display.color565(200, 200, 200));
+        }
+        else
+        {
+            int homeTextW = miniTextWidth(homeLine);
+            int homeTextX = homeLogoX + ((hasHome ? homeLogo.width : 20) - homeTextW) / 2;
+            if (homeTextX < 0)
+                homeTextX = 0;
+            drawMiniText(display, homeTextX, homeNameY, homeLine, display.color565(255, 255, 255));
+        }
     }
 
 }

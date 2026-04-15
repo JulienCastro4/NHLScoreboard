@@ -7,6 +7,11 @@ namespace {
     SemaphoreHandle_t dataModelMutex = nullptr;
     GameSnapshot current;
 
+    GoalQueueEntry goalQueue[kMaxGoalQueue];
+    uint8_t goalQueueHead = 0;
+    uint8_t goalQueueTail = 0;
+    uint8_t goalQueueCount = 0;
+
     void copyStr(char* dest, size_t destSize, const char* src) {
         if (!dest || destSize == 0) return;
         if (!src) src = "";
@@ -64,6 +69,9 @@ void dataModelInit() {
     if (dataModelMutex) {
         xSemaphoreTake(dataModelMutex, portMAX_DELAY);
         clearSnapshot(current);
+        goalQueueHead = 0;
+        goalQueueTail = 0;
+        goalQueueCount = 0;
         xSemaphoreGive(dataModelMutex);
     }
 }
@@ -74,6 +82,9 @@ void dataModelSetSelectedGame(uint32_t gameId) {
     if (current.gameId != gameId) {
         clearSnapshot(current);
         current.gameId = gameId;
+        goalQueueHead = 0;
+        goalQueueTail = 0;
+        goalQueueCount = 0;
     }
     xSemaphoreGive(dataModelMutex);
 }
@@ -212,5 +223,38 @@ void dataModelClearGoalFlag() {
     xSemaphoreTake(dataModelMutex, portMAX_DELAY);
     current.goalIsNew = false;
     xSemaphoreGive(dataModelMutex);
+}
+
+void dataModelPushGoal(const GoalQueueEntry& goal) {
+    if (!dataModelMutex) return;
+    xSemaphoreTake(dataModelMutex, portMAX_DELAY);
+    if (goalQueueCount < kMaxGoalQueue) {
+        goalQueue[goalQueueTail] = goal;
+        goalQueueTail = (goalQueueTail + 1) % kMaxGoalQueue;
+        goalQueueCount++;
+    }
+    xSemaphoreGive(dataModelMutex);
+}
+
+bool dataModelPopGoal(GoalQueueEntry& out) {
+    if (!dataModelMutex) return false;
+    xSemaphoreTake(dataModelMutex, portMAX_DELAY);
+    if (goalQueueCount == 0) {
+        xSemaphoreGive(dataModelMutex);
+        return false;
+    }
+    out = goalQueue[goalQueueHead];
+    goalQueueHead = (goalQueueHead + 1) % kMaxGoalQueue;
+    goalQueueCount--;
+    xSemaphoreGive(dataModelMutex);
+    return true;
+}
+
+uint8_t dataModelGoalQueueSize() {
+    if (!dataModelMutex) return 0;
+    xSemaphoreTake(dataModelMutex, portMAX_DELAY);
+    uint8_t c = goalQueueCount;
+    xSemaphoreGive(dataModelMutex);
+    return c;
 }
 
