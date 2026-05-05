@@ -5,6 +5,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 #include <ctype.h>
 #include <strings.h>
 
@@ -104,6 +105,7 @@ static WiFiClientSecure playByPlayClient;
 static PbpState state;
 static RosterCache rosterCache;
 static SeriesStatusCache seriesCache;
+static SemaphoreHandle_t pbpResponseMutex = nullptr;
 
 static DeserializationError fetchAndParseJson(const char* url, JsonDocument& doc, JsonDocument& filterDoc);
 
@@ -446,14 +448,18 @@ static DeserializationError fetchAndParseJson(const char* url, JsonDocument& doc
     int code = -1;
     
     for (int attempt = 0; attempt < PBP_MAX_RETRIES; attempt++) {
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("[pbp] WiFi not connected, aborting fetch");
+            break;
+        }
         playByPlayClient.stop();
         HTTPClient http;
-        http.setTimeout(30000);
+        http.setTimeout(10000);
         http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
         if (!http.begin(playByPlayClient, url)) {
             Serial.printf("[pbp] attempt %d: http.begin failed\n", attempt + 1);
-            if (attempt < PBP_MAX_RETRIES - 1) delay(PBP_RETRY_BASE_MS);
+            if (attempt < PBP_MAX_RETRIES - 1) vTaskDelay(PBP_RETRY_BASE_MS / portTICK_PERIOD_MS);
             continue;
         }
         
@@ -463,17 +469,17 @@ static DeserializationError fetchAndParseJson(const char* url, JsonDocument& doc
         if (code != HTTP_CODE_OK) {
             Serial.printf("[pbp] attempt %d: GET code=%d\n", attempt + 1, code);
             http.end();
-            if (attempt < PBP_MAX_RETRIES - 1) delay(PBP_RETRY_BASE_MS);
+            if (attempt < PBP_MAX_RETRIES - 1) vTaskDelay(PBP_RETRY_BASE_MS / portTICK_PERIOD_MS);
             continue;
         }
 
-        // Skip any garbage before JSON
+        // Skip any garbage before JSON (max 256 bytes)
         Stream& s = *http.getStreamPtr();
         uint32_t start = millis();
         int c = -1;
         size_t skipped = 0;
         
-        while ((millis() - start) < 5000) {
+        while ((millis() - start) < 5000 && skipped < 256) {
             if (s.available()) {
                 c = s.read();
                 if (c == '{') break;
@@ -502,7 +508,7 @@ static DeserializationError fetchAndParseJson(const char* url, JsonDocument& doc
         
         if (!err) break;
         Serial.printf("[pbp] attempt %d: parse %s\n", attempt + 1, err.c_str());
-        if (attempt < PBP_MAX_RETRIES - 1) delay(PBP_RETRY_BASE_MS);
+        if (attempt < PBP_MAX_RETRIES - 1) vTaskDelay(PBP_RETRY_BASE_MS / portTICK_PERIOD_MS);
     }
     
     return err;
@@ -743,10 +749,14 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
     }
     root["goalIsNew"] = goal.isNew;
 
-    serializeJson(out, state.lastGoodResponse);
+    String serialized;
+    serializeJson(out, serialized);
+    if (pbpResponseMutex) xSemaphoreTake(pbpResponseMutex, portMAX_DELAY);
+    state.lastGoodResponse = serialized;
     state.lastFetchMs = millis();
     state.lastFailMs = 0;
-    Serial.printf("[pbp] fetch ok bytes=%u\n", (unsigned)state.lastGoodResponse.length());
+    if (pbpResponseMutex) xSemaphoreGive(pbpResponseMutex);
+    Serial.printf("[pbp] fetch ok bytes=%u\n", (unsigned)serialized.length());
     return true;
 }
 
@@ -760,6 +770,12 @@ static void playByPlayPollTask(void*) {
         
         if (gameId == 0) {
             vTaskDelay(1000 / portTICK_PERIOD_MS);
+            continue;
+        }
+
+        // Don't attempt fetch if WiFi is down
+        if (WiFi.status() != WL_CONNECTED) {
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
             continue;
         }
         
@@ -799,10 +815,13 @@ static void playByPlayPollTask(void*) {
 // ============================================================================
 
 static void handleApiPlayByPlay() {
+    if (pbpResponseMutex) xSemaphoreTake(pbpResponseMutex, pdMS_TO_TICKS(100));
     if (state.lastGoodResponse.length() > 0) {
         playByPlayServer->send(200, "application/json", state.lastGoodResponse);
+        if (pbpResponseMutex) xSemaphoreGive(pbpResponseMutex);
         return;
     }
+    if (pbpResponseMutex) xSemaphoreGive(pbpResponseMutex);
     playByPlayServer->send(503, "application/json", "{\"error\":\"warming\"}");
 }
 
@@ -813,12 +832,13 @@ static void handleApiPlayByPlay() {
 void playByPlayServiceInit(WebServer& server) {
     playByPlayServer = &server;
     playByPlayClient.setInsecure();
-    playByPlayClient.setTimeout(30);
+    playByPlayClient.setTimeout(10);
     seriesCache.clear();
+    if (!pbpResponseMutex) pbpResponseMutex = xSemaphoreCreateMutex();
     
     playByPlayServer->on("/api/playbyplay", HTTP_GET, handleApiPlayByPlay);
     
-    if (xTaskCreate(playByPlayPollTask, "pbp_poll", 16384, NULL, 1, NULL) != pdPASS) {
+    if (xTaskCreate(playByPlayPollTask, "pbp_poll", 20480, NULL, 1, NULL) != pdPASS) {
         Serial.println("Warn: pbp_poll task creation failed");
     }
 }

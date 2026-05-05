@@ -5,6 +5,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 
 #include "api_server.h"
 #include "display/data_model.h"
@@ -42,6 +43,7 @@ struct ScheduleState {
 static WebServer* scheduleServer = nullptr;
 static WiFiClientSecure scheduleClient;
 static ScheduleState state;
+static SemaphoreHandle_t scheduleResponseMutex = nullptr;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -132,15 +134,19 @@ static DeserializationError fetchAndParseJson(JsonDocument& doc, JsonDocument& f
     int code = -1;
     
     for (int attempt = 0; attempt < SCHEDULE_MAX_RETRIES; attempt++) {
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("[schedule] WiFi not connected, aborting fetch");
+            break;
+        }
         scheduleClient.stop();
         HTTPClient http;
-        http.setTimeout(30000);
+        http.setTimeout(10000);
         http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
         if (!http.begin(scheduleClient, NHL_SCHEDULE_URL)) {
             Serial.printf("[schedule] attempt %d: http.begin failed\n", attempt + 1);
             if (attempt < SCHEDULE_MAX_RETRIES - 1) {
-                delay(SCHEDULE_RETRY_BASE_MS * (1UL << attempt));
+                vTaskDelay((SCHEDULE_RETRY_BASE_MS * (1UL << attempt)) / portTICK_PERIOD_MS);
             }
             continue;
         }
@@ -152,18 +158,18 @@ static DeserializationError fetchAndParseJson(JsonDocument& doc, JsonDocument& f
             Serial.printf("[schedule] attempt %d: GET code=%d\n", attempt + 1, code);
             http.end();
             if (attempt < SCHEDULE_MAX_RETRIES - 1) {
-                delay(SCHEDULE_RETRY_BASE_MS * (1UL << attempt));
+                vTaskDelay((SCHEDULE_RETRY_BASE_MS * (1UL << attempt)) / portTICK_PERIOD_MS);
             }
             continue;
         }
         
-        // Skip any garbage before JSON
+        // Skip any garbage before JSON (max 256 bytes)
         Stream& s = *http.getStreamPtr();
         uint32_t start = millis();
         int c = -1;
         size_t skipped = 0;
         
-        while ((millis() - start) < 5000) {
+        while ((millis() - start) < 5000 && skipped < 256) {
             if (s.available()) {
                 c = s.read();
                 if (c == '{') break;
@@ -193,7 +199,7 @@ static DeserializationError fetchAndParseJson(JsonDocument& doc, JsonDocument& f
         if (!err) break;
         Serial.printf("[schedule] attempt %d: parse %s\n", attempt + 1, err.c_str());
         if (attempt < SCHEDULE_MAX_RETRIES - 1) {
-            delay(SCHEDULE_RETRY_BASE_MS * (1UL << attempt));
+            vTaskDelay((SCHEDULE_RETRY_BASE_MS * (1UL << attempt)) / portTICK_PERIOD_MS);
         }
     }
     
@@ -264,12 +270,16 @@ static bool fetchScheduleOnce() {
         (unsigned)gamesByDate.size(),
         totalGames);
     
-    serializeJson(out, state.lastGoodResponse);
+    String serialized;
+    serializeJson(out, serialized);
+    if (scheduleResponseMutex) xSemaphoreTake(scheduleResponseMutex, portMAX_DELAY);
+    state.lastGoodResponse = serialized;
     state.lastFetchMs = millis();
     state.lastFailMs = 0;
+    if (scheduleResponseMutex) xSemaphoreGive(scheduleResponseMutex);
     
     Serial.printf("[schedule] fetch ok bytes=%u\n", 
-        (unsigned)state.lastGoodResponse.length());
+        (unsigned)serialized.length());
     return true;
 }
 
@@ -330,6 +340,12 @@ static void schedulePollTask(void*) {
             Serial.println("[schedule] resumed (no game selected)");
             state.paused = false;
         }
+
+        // Don't attempt fetch if WiFi is down
+        if (WiFi.status() != WL_CONNECTED) {
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            continue;
+        }
         
         // Backoff after failure
         if (state.lastFailMs > 0) {
@@ -350,10 +366,13 @@ static void schedulePollTask(void*) {
 // ============================================================================
 
 static void handleApiSchedule() {
+    if (scheduleResponseMutex) xSemaphoreTake(scheduleResponseMutex, pdMS_TO_TICKS(100));
     if (state.lastGoodResponse.length() > 0) {
         scheduleServer->send(200, "application/json", state.lastGoodResponse);
+        if (scheduleResponseMutex) xSemaphoreGive(scheduleResponseMutex);
         return;
     }
+    if (scheduleResponseMutex) xSemaphoreGive(scheduleResponseMutex);
     scheduleServer->send(503, "application/json", "{\"error\":\"warming\"}");
 }
 
@@ -364,7 +383,8 @@ static void handleApiSchedule() {
 void scheduleServiceInit(WebServer& server) {
     scheduleServer = &server;
     scheduleClient.setInsecure();
-    scheduleClient.setTimeout(30);
+    scheduleClient.setTimeout(10);
+    if (!scheduleResponseMutex) scheduleResponseMutex = xSemaphoreCreateMutex();
     
     scheduleServer->on("/api/schedule", HTTP_GET, handleApiSchedule);
     

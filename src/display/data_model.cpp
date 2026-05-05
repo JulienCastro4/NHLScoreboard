@@ -235,7 +235,7 @@ void dataModelUpdateFromPbp(uint32_t gameId,
 
 bool dataModelGetSnapshot(GameSnapshot& out) {
     if (!dataModelMutex) return false;
-    xSemaphoreTake(dataModelMutex, portMAX_DELAY);
+    if (xSemaphoreTake(dataModelMutex, pdMS_TO_TICKS(50)) != pdTRUE) return false;
     out = current;
     xSemaphoreGive(dataModelMutex);
     return out.gameId != 0;

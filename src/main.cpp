@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 #include <ESPmDNS.h>
 #include <time.h>
+#include <esp_task_wdt.h>
 #include "secrets.h"
 #include "api_server.h"
 #include "display/display_manager.h"
@@ -10,9 +11,17 @@
 const char* WIFI_SSID = WIFI_SSID_SECRET;
 const char* WIFI_PASS = WIFI_PASS_SECRET;
 
+static unsigned long lastWifiCheckMs = 0;
+static const unsigned long WIFI_CHECK_INTERVAL_MS = 10000;
+static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000;
+
 void setup() {
   Serial.begin(115200);
   delay(2000);
+
+  // Enable task watchdog (15s timeout)
+  esp_task_wdt_init(15, true);
+  esp_task_wdt_add(NULL); // add loop task
 
   if (!LittleFS.begin(true)) {
     Serial.println("Erreur LittleFS");
@@ -21,11 +30,18 @@ void setup() {
   Serial.println("LittleFS OK");
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Connexion WiFi");
+  unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStart > WIFI_CONNECT_TIMEOUT_MS) {
+      Serial.println("\nWiFi timeout - reboot");
+      ESP.restart();
+    }
     delay(500);
     Serial.print(".");
+    esp_task_wdt_reset();
   }
   Serial.println();
   Serial.print("Connecté. IP: ");
@@ -63,6 +79,19 @@ void setup() {
 }
 
 void loop() {
+  esp_task_wdt_reset();
+
+  // WiFi reconnection check
+  unsigned long now = millis();
+  if (now - lastWifiCheckMs >= WIFI_CHECK_INTERVAL_MS) {
+    lastWifiCheckMs = now;
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[wifi] disconnected, reconnecting...");
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
+    }
+  }
+
   apiServerLoop();
   displayTick();
 }
