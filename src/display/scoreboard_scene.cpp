@@ -287,7 +287,7 @@ void ScoreboardScene::resetFinalPhase()
 {
     finalPhaseStartMs = millis();
     finalSeriesPhaseUnlocked = false;
-    scoreSlideY = 0;
+    // scoreSlideY will animate back to 0 naturally via the slide logic
 }
 
 void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &data, uint32_t nowMs)
@@ -371,7 +371,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     {
         finalSeriesPhaseUnlocked = false;
         finalPhaseStartMs = nowMs;
-        scoreSlideY = 0;
+        // scoreSlideY will animate back to 0 naturally via the slide logic below
     }
 
     const bool showFinalSeries = (isFinal || isPre) && isPlayoffGame && hasSeriesData && finalSeriesPhaseUnlocked;
