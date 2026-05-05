@@ -80,7 +80,7 @@ static void handleApiSelectGame() {
     selectedGameId = id;
     saveSelectedGameId(id);
     dataModelSetSelectedGame(id);
-    Serial.printf("[api] select gameId=%u\n", (unsigned)id);
+    Serial.printf("[api] select gameId=%u (snapshot reset, waiting for PBP)\n", (unsigned)id);
 
     server.send(200, "application/json", "{}");
 }

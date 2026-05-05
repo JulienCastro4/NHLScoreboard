@@ -16,6 +16,7 @@
 // CONSTANTS
 // ============================================================================
 static const char* NHL_PBP_URL_FMT = "https://api-web.nhle.com/v1/gamecenter/%u/play-by-play";
+static const char* NHL_SCOREBOARD_URL = "https://api-web.nhle.com/v1/scoreboard/now";
 static const unsigned long PBP_MIN_INTERVAL_MS = 5000;
 static const unsigned long PBP_FAIL_BACKOFF_MS = 5000;
 static const int PBP_MAX_RETRIES = 3;
@@ -75,6 +76,26 @@ struct RosterCache {
     }
 };
 
+struct SeriesStatusCache {
+    uint32_t gameId;
+    char topSeedAbbrev[4];
+    uint8_t topSeedWins;
+    char bottomSeedAbbrev[4];
+    uint8_t bottomSeedWins;
+    unsigned long lastAttemptMs;
+    bool valid;
+
+    void clear() {
+        gameId = 0;
+        topSeedAbbrev[0] = '\0';
+        topSeedWins = 0;
+        bottomSeedAbbrev[0] = '\0';
+        bottomSeedWins = 0;
+        lastAttemptMs = 0;
+        valid = false;
+    }
+};
+
 // ============================================================================
 // GLOBALS
 // ============================================================================
@@ -82,6 +103,9 @@ static WebServer* playByPlayServer = nullptr;
 static WiFiClientSecure playByPlayClient;
 static PbpState state;
 static RosterCache rosterCache;
+static SeriesStatusCache seriesCache;
+
+static DeserializationError fetchAndParseJson(const char* url, JsonDocument& doc, JsonDocument& filterDoc);
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -121,6 +145,51 @@ static String resolvePlayerName(const char* apiName, int playerId) {
     if (apiName && apiName[0]) return String(apiName);
     const char* cached = rosterCache.lookupName(playerId);
     return String(cached);
+}
+
+static void copyShort(char* dest, size_t destSize, const char* src) {
+    if (!dest || destSize == 0) return;
+    if (!src) src = "";
+    strncpy(dest, src, destSize - 1);
+    dest[destSize - 1] = '\0';
+}
+
+static bool fetchSeriesStatusFromScoreboard(uint32_t gameId,
+    char* topAbbrev,
+    uint8_t& topWins,
+    char* bottomAbbrev,
+    uint8_t& bottomWins) {
+    JsonDocument doc;
+    JsonDocument filter;
+    filter["gamesByDate"][0]["games"][0]["id"] = true;
+    filter["gamesByDate"][0]["games"][0]["seriesStatus"]["topSeedTeamAbbrev"] = true;
+    filter["gamesByDate"][0]["games"][0]["seriesStatus"]["topSeedWins"] = true;
+    filter["gamesByDate"][0]["games"][0]["seriesStatus"]["bottomSeedTeamAbbrev"] = true;
+    filter["gamesByDate"][0]["games"][0]["seriesStatus"]["bottomSeedWins"] = true;
+
+    DeserializationError err = fetchAndParseJson(NHL_SCOREBOARD_URL, doc, filter);
+    if (err) {
+        return false;
+    }
+
+    JsonArray days = doc["gamesByDate"];
+    if (days.isNull()) return false;
+
+    for (JsonObject day : days) {
+        JsonArray games = day["games"];
+        for (JsonObject game : games) {
+            if ((game["id"] | 0) != gameId) continue;
+            JsonObject series = game["seriesStatus"];
+            if (series.isNull()) return false;
+            copyShort(topAbbrev, 4, series["topSeedTeamAbbrev"] | "");
+            topWins = series["topSeedWins"] | 0;
+            copyShort(bottomAbbrev, 4, series["bottomSeedTeamAbbrev"] | "");
+            bottomWins = series["bottomSeedWins"] | 0;
+            return topAbbrev[0] && bottomAbbrev[0];
+        }
+    }
+
+    return false;
 }
 
 static bool isFinalState(const char* state) {
@@ -310,6 +379,11 @@ static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
 // ============================================================================
 
 static void buildPlayByPlayFilter(JsonDocument& f) {
+    f["gameType"] = true;
+    f["seriesStatus"]["topSeedTeamAbbrev"] = true;
+    f["seriesStatus"]["topSeedWins"] = true;
+    f["seriesStatus"]["bottomSeedTeamAbbrev"] = true;
+    f["seriesStatus"]["bottomSeedWins"] = true;
     f["gameState"] = true;
     f["startTimeUTC"] = true;
     f["easternUTCOffset"] = true;
@@ -494,6 +568,57 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
     detectNewGoals(plays, goal);
 
     const char* gameState = doc["gameState"] | "";
+    const uint8_t gameType = doc["gameType"] | 0;
+    char seriesTopSeedAbbrev[4];
+    uint8_t seriesTopSeedWins = doc["seriesStatus"]["topSeedWins"] | 0;
+    char seriesBottomSeedAbbrev[4];
+    uint8_t seriesBottomSeedWins = doc["seriesStatus"]["bottomSeedWins"] | 0;
+    copyShort(seriesTopSeedAbbrev, sizeof(seriesTopSeedAbbrev), doc["seriesStatus"]["topSeedTeamAbbrev"] | "");
+    copyShort(seriesBottomSeedAbbrev, sizeof(seriesBottomSeedAbbrev), doc["seriesStatus"]["bottomSeedTeamAbbrev"] | "");
+
+    // Fallback: PBP endpoint may not include seriesStatus. Fetch it from scoreboard/now.
+    if (gameType == 3 && (!seriesTopSeedAbbrev[0] || !seriesBottomSeedAbbrev[0])) {
+        const unsigned long now = millis();
+        if (seriesCache.valid && seriesCache.gameId == gameId) {
+            copyShort(seriesTopSeedAbbrev, sizeof(seriesTopSeedAbbrev), seriesCache.topSeedAbbrev);
+            seriesTopSeedWins = seriesCache.topSeedWins;
+            copyShort(seriesBottomSeedAbbrev, sizeof(seriesBottomSeedAbbrev), seriesCache.bottomSeedAbbrev);
+            seriesBottomSeedWins = seriesCache.bottomSeedWins;
+        } else if (now - seriesCache.lastAttemptMs > 30000UL) {
+            seriesCache.lastAttemptMs = now;
+            char top[4] = {0};
+            char bottom[4] = {0};
+            uint8_t topWins = 0;
+            uint8_t bottomWins = 0;
+            if (fetchSeriesStatusFromScoreboard(gameId, top, topWins, bottom, bottomWins)) {
+                copyShort(seriesTopSeedAbbrev, sizeof(seriesTopSeedAbbrev), top);
+                seriesTopSeedWins = topWins;
+                copyShort(seriesBottomSeedAbbrev, sizeof(seriesBottomSeedAbbrev), bottom);
+                seriesBottomSeedWins = bottomWins;
+
+                seriesCache.gameId = gameId;
+                copyShort(seriesCache.topSeedAbbrev, sizeof(seriesCache.topSeedAbbrev), top);
+                seriesCache.topSeedWins = topWins;
+                copyShort(seriesCache.bottomSeedAbbrev, sizeof(seriesCache.bottomSeedAbbrev), bottom);
+                seriesCache.bottomSeedWins = bottomWins;
+                seriesCache.valid = true;
+                Serial.printf("[pbp] series fallback game=%u %s %u-%u %s\n",
+                    (unsigned)gameId,
+                    top,
+                    (unsigned)topWins,
+                    (unsigned)bottomWins,
+                    bottom);
+            }
+        }
+    }
+    Serial.printf("[pbp] meta game=%u state=%s gameType=%u series=%s %u-%u %s\n",
+        (unsigned)gameId,
+        gameState,
+        (unsigned)gameType,
+        seriesTopSeedAbbrev[0] ? seriesTopSeedAbbrev : "-",
+        (unsigned)seriesTopSeedWins,
+        (unsigned)seriesBottomSeedWins,
+        seriesBottomSeedAbbrev[0] ? seriesBottomSeedAbbrev : "-");
     const uint8_t period = doc["periodDescriptor"]["number"] | 0;
     const uint32_t awayId = doc["awayTeam"]["id"] | 0;
     const uint32_t homeId = doc["homeTeam"]["id"] | 0;
@@ -520,6 +645,11 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
     // Update data model (goals are queued separately, not via goalIsNew)
     dataModelUpdateFromPbp(
         gameId,
+        gameType,
+        seriesTopSeedAbbrev,
+        seriesTopSeedWins,
+        seriesBottomSeedAbbrev,
+        seriesBottomSeedWins,
         gameState,
         doc["startTimeUTC"] | "",
         utcOffset,
@@ -556,6 +686,7 @@ static bool fetchPlayByPlayOnce(uint32_t gameId) {
     JsonDocument out;
     JsonObject root = out.to<JsonObject>();
     root["gameId"] = gameId;
+    root["gameType"] = gameType;
     root["gameState"] = doc["gameState"] | "";
     root["period"] = doc["periodDescriptor"]["number"] | 0;
     
@@ -642,6 +773,7 @@ static void playByPlayPollTask(void*) {
             state.primed = false;
             state.hadEmptyFetch = false;
             rosterCache.clear();
+            seriesCache.clear();
             
             fetchPlayByPlayOnce(gameId);
             vTaskDelay(PBP_MIN_INTERVAL_MS / portTICK_PERIOD_MS);
@@ -682,6 +814,7 @@ void playByPlayServiceInit(WebServer& server) {
     playByPlayServer = &server;
     playByPlayClient.setInsecure();
     playByPlayClient.setTimeout(30);
+    seriesCache.clear();
     
     playByPlayServer->on("/api/playbyplay", HTTP_GET, handleApiPlayByPlay);
     

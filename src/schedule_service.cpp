@@ -57,6 +57,7 @@ static void buildTeamJson(const JsonObject& out, JsonObjectConst team) {
 
 static void buildGameJson(const JsonObject& out, JsonObjectConst game, const char* date) {
     out["id"] = game["id"];
+    out["gameType"] = game["gameType"] | 0;
     out["date"] = date;
     out["startTimeUTC"] = game["startTimeUTC"] | "?";
     out["easternUTCOffset"] = game["easternUTCOffset"] | "";
@@ -66,6 +67,14 @@ static void buildGameJson(const JsonObject& out, JsonObjectConst game, const cha
     buildTeamJson(out["home"].to<JsonObject>(), game["homeTeam"]);
     
     out["period"] = game["periodDescriptor"]["number"] | 0;
+
+    if (!game["seriesStatus"].isNull()) {
+        JsonObject series = out["seriesStatus"].to<JsonObject>();
+        series["topSeedTeamAbbrev"] = game["seriesStatus"]["topSeedTeamAbbrev"] | "";
+        series["topSeedWins"] = game["seriesStatus"]["topSeedWins"] | 0;
+        series["bottomSeedTeamAbbrev"] = game["seriesStatus"]["bottomSeedTeamAbbrev"] | "";
+        series["bottomSeedWins"] = game["seriesStatus"]["bottomSeedWins"] | 0;
+    }
     
     if (!game["clock"].isNull()) {
         JsonObject clock = out["clock"].to<JsonObject>();
@@ -87,9 +96,14 @@ static void buildScheduleFilter(JsonDocument& f) {
     JsonArray ga = day["games"].to<JsonArray>();
     JsonObject g = ga.add<JsonObject>();
     g["id"] = true;
+    g["gameType"] = true;
     g["startTimeUTC"] = true;
     g["easternUTCOffset"] = true;
     g["gameState"] = true;
+    g["seriesStatus"]["topSeedTeamAbbrev"] = true;
+    g["seriesStatus"]["topSeedWins"] = true;
+    g["seriesStatus"]["bottomSeedTeamAbbrev"] = true;
+    g["seriesStatus"]["bottomSeedWins"] = true;
     g["awayTeam"]["abbrev"] = true;
     g["awayTeam"]["placeNameWithPreposition"]["default"] = true;
     g["awayTeam"]["commonName"]["default"] = true;

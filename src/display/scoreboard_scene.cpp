@@ -107,6 +107,61 @@ namespace
         return (s[0] - '0') * 10 + (s[1] - '0');
     }
 
+    int parseFour(const char *s)
+    {
+        if (!s ||
+            s[0] < '0' || s[0] > '9' ||
+            s[1] < '0' || s[1] > '9' ||
+            s[2] < '0' || s[2] > '9' ||
+            s[3] < '0' || s[3] > '9')
+            return -1;
+        return (s[0] - '0') * 1000 +
+               (s[1] - '0') * 100 +
+               (s[2] - '0') * 10 +
+               (s[3] - '0');
+    }
+
+    // Convert civil date to days since Unix epoch (1970-01-01).
+    int64_t daysFromCivil(int y, unsigned m, unsigned d)
+    {
+        y -= m <= 2;
+        const int era = (y >= 0 ? y : y - 399) / 400;
+        const unsigned yoe = (unsigned)(y - era * 400);
+        const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+        const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        return era * 146097 + (int)doe - 719468;
+    }
+
+    bool parseUtcIsoToEpoch(const char *iso, time_t &outEpoch)
+    {
+        if (!iso)
+            return false;
+        // Expected format: YYYY-MM-DDTHH:MM:SSZ
+        if (strlen(iso) < 20)
+            return false;
+        if (iso[4] != '-' || iso[7] != '-' || iso[10] != 'T' || iso[13] != ':' || iso[16] != ':')
+            return false;
+
+        const int year = parseFour(iso + 0);
+        const int month = parseTwo(iso + 5);
+        const int day = parseTwo(iso + 8);
+        const int hour = parseTwo(iso + 11);
+        const int minute = parseTwo(iso + 14);
+        const int second = parseTwo(iso + 17);
+
+        if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 ||
+            hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59)
+            return false;
+
+        const int64_t days = daysFromCivil(year, (unsigned)month, (unsigned)day);
+        const int64_t totalSeconds = days * 86400LL + (int64_t)hour * 3600LL + (int64_t)minute * 60LL + second;
+        if (totalSeconds < 0)
+            return false;
+
+        outEpoch = (time_t)totalSeconds;
+        return true;
+    }
+
     int parseOffsetMinutes(const char *offset)
     {
         if (!offset || !offset[0])
@@ -164,64 +219,19 @@ namespace
 
     bool isGameSoonToStart(const GameSnapshot &data)
     {
-        // Check if game start time has passed but game hasn't started
+        // Show SOON when scheduled start time is reached but game is still PRE/FUT.
         if (!data.startTimeUtc[0])
             return false;
 
-        // Parse start time: format is "YYYY-MM-DDTHH:MM:SSZ"
-        // Example: "2026-02-11T15:30:00Z"
-        if (strlen(data.startTimeUtc) < 16)
+        time_t startUtc = 0;
+        if (!parseUtcIsoToEpoch(data.startTimeUtc, startUtc))
             return false;
 
-        int startYear = (data.startTimeUtc[0] - '0') * 1000 + (data.startTimeUtc[1] - '0') * 100 +
-                        (data.startTimeUtc[2] - '0') * 10 + (data.startTimeUtc[3] - '0');
-        int startMonth = parseTwo(data.startTimeUtc + 5);
-        int startDay = parseTwo(data.startTimeUtc + 8);
+        const time_t nowUtc = time(nullptr);
+        if (nowUtc < 100000)
+            return false; // NTP not ready
 
-        const char *t = strchr(data.startTimeUtc, 'T');
-        if (!t || strlen(t) < 6)
-            return false;
-
-        int startHH = parseTwo(t + 1);
-        int startMM = parseTwo(t + 4);
-        if (startHH < 0 || startMM < 0 || startMonth < 0 || startDay < 0)
-            return false;
-
-        // Get current time (ESP32 has current time from NTP)
-        time_t now;
-        time(&now);
-        struct tm timeinfo;
-        localtime_r(&now, &timeinfo);
-
-        // Apply UTC offset to start time
-        int startTotalMinutes = startHH * 60 + startMM + parseOffsetMinutes(data.utcOffset);
-        int startDayAdjust = 0;
-        while (startTotalMinutes < 0)
-        {
-            startTotalMinutes += 24 * 60;
-            startDayAdjust = -1;
-        }
-        if (startTotalMinutes >= 24 * 60)
-        {
-            startTotalMinutes -= 24 * 60;
-            startDayAdjust = 1;
-        }
-        int adjustedDay = startDay + startDayAdjust;
-
-        // Compare dates first (year, month, day)
-        int currentYear = timeinfo.tm_year + 1900;
-        int currentMonth = timeinfo.tm_mon + 1; // tm_mon is 0-11
-        int currentDay = timeinfo.tm_mday;
-
-        // If not the same day, not "soon"
-        if (startYear != currentYear || startMonth != currentMonth || adjustedDay != currentDay)
-        {
-            return false;
-        }
-
-        // Same day - check if current time >= start time
-        int currentTotalMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
-        return (currentTotalMinutes >= startTotalMinutes);
+        return nowUtc >= startUtc;
     }
 
     int textWidth(const char *s)
@@ -273,7 +283,14 @@ namespace
     }
 }
 
-void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &data, uint32_t)
+void ScoreboardScene::resetFinalPhase()
+{
+    finalPhaseStartMs = millis();
+    finalSeriesPhaseUnlocked = false;
+    scoreSlideY = 0;
+}
+
+void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &data, uint32_t nowMs)
 {
     display.clearScreen();
     display.setTextWrap(false);
@@ -310,6 +327,54 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     const bool isPre = (strcasecmp(state, "PRE") == 0 || strcasecmp(state, "FUT") == 0);
     const bool isFinal = (strcasecmp(state, "OFF") == 0 || strcasecmp(state, "FINAL") == 0);
     const bool isLive = (strcasecmp(state, "LIVE") == 0 || strcasecmp(state, "CRIT") == 0);
+    const bool isPlayoffGame = (data.gameType == 3);
+    const bool hasSeriesData = data.seriesTopSeedAbbrev[0] && data.seriesBottomSeedAbbrev[0];
+
+    if (isFinal || isPre)
+    {
+        if (!finalPhaseActive || finalPhaseGameId != data.gameId)
+        {
+            finalPhaseActive = true;
+            finalPhaseGameId = data.gameId;
+            finalPhaseStartMs = nowMs;
+            finalSeriesPhaseUnlocked = false;
+            hadSeriesData = false;
+        }
+    }
+    else
+    {
+        finalPhaseActive = false;
+        finalPhaseGameId = 0;
+        finalSeriesPhaseUnlocked = false;
+        hadSeriesData = false;
+    }
+
+    // Detect when series data first arrives and reset the 10s timer
+    if ((isFinal || isPre) && isPlayoffGame && hasSeriesData && !hadSeriesData)
+    {
+        finalPhaseStartMs = nowMs;
+        finalSeriesPhaseUnlocked = false;
+    }
+    hadSeriesData = hasSeriesData;
+
+    if ((isFinal || isPre) && isPlayoffGame && hasSeriesData && finalPhaseActive && !finalSeriesPhaseUnlocked)
+    {
+        if (nowMs - finalPhaseStartMs >= 10000UL)
+        {
+            finalSeriesPhaseUnlocked = true;
+            seriesShownMs = nowMs;
+        }
+    }
+
+    // For PRE games, auto-cycle: after 10s of series display, reset to show normal PRE info
+    if (isPre && finalSeriesPhaseUnlocked && (nowMs - seriesShownMs >= 10000UL))
+    {
+        finalSeriesPhaseUnlocked = false;
+        finalPhaseStartMs = nowMs;
+        scoreSlideY = 0;
+    }
+
+    const bool showFinalSeries = (isFinal || isPre) && isPlayoffGame && hasSeriesData && finalSeriesPhaseUnlocked;
     const bool clockExpired = (data.period > 0 && isClockExpired(data.timeRemaining));
     const bool hasStarted = (data.period > 0) || data.away.score > 0 || data.home.score > 0;
     const bool isEndOfPeriodState = !isPre && !isFinal && hasStarted && (data.inIntermission || clockExpired);
@@ -382,15 +447,18 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
             }
             else if (data.period == 4)
             {
-                snprintf(statusLine, sizeof(statusLine), "END 4TH");
+                snprintf(statusLine, sizeof(statusLine), "END OT");
             }
-            else if (data.period == 5)
+            else if (data.period >= 5)
             {
-                snprintf(statusLine, sizeof(statusLine), "END 5TH");
-            }
-            else if (data.period == 6)
-            {
-                snprintf(statusLine, sizeof(statusLine), "END 6TH");
+                if (isPlayoffGame)
+                {
+                    snprintf(statusLine, sizeof(statusLine), "END OT%u", (unsigned)(data.period - 3));
+                }
+                else
+                {
+                    snprintf(statusLine, sizeof(statusLine), "END SO");
+                }
             }
             else
             {
@@ -399,7 +467,22 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         }
         else if (data.period > 0 && data.timeRemaining[0])
         {
-            snprintf(statusLine, sizeof(statusLine), "P-%u", (unsigned)data.period);
+            if (data.period <= 3)
+            {
+                snprintf(statusLine, sizeof(statusLine), "P-%u", (unsigned)data.period);
+            }
+            else if (data.period == 4)
+            {
+                snprintf(statusLine, sizeof(statusLine), "OT");
+            }
+            else if (isPlayoffGame)
+            {
+                snprintf(statusLine, sizeof(statusLine), "OT%u", (unsigned)(data.period - 3));
+            }
+            else
+            {
+                snprintf(statusLine, sizeof(statusLine), "SO");
+            }
         }
         else
         {
@@ -448,6 +531,22 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         return;
     }
 
+    if ((isFinal || isPre) && isPlayoffGame && !hasSeriesData)
+    {
+        // Wait for series fallback data before showing playoff layout.
+        int w1 = miniTextWidth("SERIES");
+        int x1 = (panelW - w1) / 2;
+        if (x1 < 0)
+            x1 = 0;
+        int w2 = miniTextWidth("LOADING");
+        int x2 = (panelW - w2) / 2;
+        if (x2 < 0)
+            x2 = 0;
+        drawMiniText(display, x1, 11, "SERIES", display.color565(180, 200, 255));
+        drawMiniText(display, x2, 18, "LOADING", display.color565(160, 180, 220));
+        return;
+    }
+
     int awayLogoX = 0;
     int homeLogoX = panelW - 20;
     display.drawRGBBitmap(0, logoYOffset, awayLogo.pixels, awayLogo.width, awayLogo.height);
@@ -467,8 +566,21 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     int scoreX = (panelW - scoreW) / 2;
     if (scoreX < 0)
         scoreX = 0;
+    {
+        const int target = showFinalSeries ? -4 : 0;
+        unsigned long now = millis();
+        if (scoreSlideY != target && (now - lastScoreSlideMs >= 60))
+        {
+            if (scoreSlideY < target)
+                scoreSlideY++;
+            else if (scoreSlideY > target)
+                scoreSlideY--;
+            lastScoreSlideMs = now;
+        }
+    }
+    const int scoreYOffset = sceneOffsetY + scoreSlideY;
     const int logoHeight = hasAway ? awayLogo.height : 20;
-    const int scoreY = (logoHeight - 8) / 2 + sceneOffsetY; // Center vertically (fixed, doesn't slide)
+    const int scoreY = (logoHeight - 8) / 2 + scoreYOffset;
     display.setCursor(scoreX, scoreY);
     display.print(scoreLine);
 
@@ -496,7 +608,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
             timeX = 0;
         drawMiniText(display, timeX, timeY, timeLine, display.color565(180, 200, 255));
     }
-    else
+    else if (!showFinalSeries)
     {
         int statusW = miniTextWidth(statusLine);
         int statusX = (panelW - statusW) / 2;
@@ -516,9 +628,11 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         }
     }
 
-    // Toggle SOG display every 15 seconds during live games (but not during PP)
+    // Toggle SOG display every 15 seconds during live games (but not during active PP)
     const bool anyPP = data.awayPP || data.homePP;
-    if (isLive && !anyPP)
+    const bool ppVisible = !isEndOfPeriodState;
+    const bool anyActivePP = anyPP && ppVisible;
+    if (isLive && !anyActivePP)
     {
         unsigned long now = millis();
         if (now - lastToggleMs >= 15000)
@@ -540,7 +654,64 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
     int awayNameY = (hasAway ? awayLogo.height : 21) + logoYOffset;
     int homeNameY = (hasHome ? homeLogo.height : 21) + logoYOffset;
 
-    if (isLive && showSOG && !anyPP)
+    if (showFinalSeries)
+    {
+        char line1[10] = {0};
+        char line2[10] = {0};
+        char line3[10] = {0};
+        const uint8_t topWins = data.seriesTopSeedWins;
+        const uint8_t bottomWins = data.seriesBottomSeedWins;
+        snprintf(line3, sizeof(line3), "%u-%u", (unsigned)topWins, (unsigned)bottomWins);
+
+        if (topWins == bottomWins)
+        {
+            snprintf(line1, sizeof(line1), "SERIES");
+            snprintf(line2, sizeof(line2), "TIED");
+        }
+        else
+        {
+            const bool topLeads = topWins > bottomWins;
+            const char *leadAbbrev = topLeads ? data.seriesTopSeedAbbrev : data.seriesBottomSeedAbbrev;
+            const uint8_t leadWins = topLeads ? topWins : bottomWins;
+            const uint8_t trailWins = topLeads ? bottomWins : topWins;
+            snprintf(line1, sizeof(line1), "%s", leadAbbrev);
+            if (leadWins >= 4)
+            {
+                snprintf(line2, sizeof(line2), "WINS");
+            }
+            else
+            {
+                snprintf(line2, sizeof(line2), "LEADS");
+            }
+            snprintf(line3, sizeof(line3), "%u-%u", (unsigned)leadWins, (unsigned)trailWins);
+        }
+
+        const int panelH = display.height();
+        const int lineStep = 6;
+        const int blockH = 5 + lineStep + lineStep;
+        int y1 = (panelH - blockH) / 2 + 6;
+        int y2 = y1 + 6;
+        int y3 = y2 + 6;
+
+        int w1 = miniTextWidth(line1);
+        int x1 = (panelW - w1) / 2;
+        if (x1 < 0)
+            x1 = 0;
+        int w2 = miniTextWidth(line2);
+        int x2 = (panelW - w2) / 2;
+        if (x2 < 0)
+            x2 = 0;
+        int w3 = miniTextWidth(line3);
+        int x3 = (panelW - w3) / 2;
+        if (x3 < 0)
+            x3 = 0;
+
+        drawMiniText(display, x1, y1, line1, display.color565(255, 255, 255));
+        drawMiniText(display, x2, y2, line2, display.color565(180, 200, 255));
+        drawMiniText(display, x3, y3, line3, display.color565(180, 200, 255));
+    }
+
+    if (isLive && showSOG && !anyActivePP)
     {
         // Show SOG on 2 lines: number on top, "SOG" below
         char awaySogNum[8];
@@ -583,7 +754,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         const bool flash = ((millis() / 300) % 2) == 0;
 
         // Away label: show flashing PP if away is on power play, else abbreviation
-        if (data.awayPP)
+        if (data.awayPP && ppVisible)
         {
             int ppW = miniTextWidth("PP");
             int ppX = awayLogoX + ((hasAway ? awayLogo.width : 20) - ppW) / 2;
@@ -601,7 +772,7 @@ void ScoreboardScene::render(MatrixPanel_I2S_DMA &display, const GameSnapshot &d
         }
 
         // Home label: show flashing PP if home is on power play, else abbreviation
-        if (data.homePP)
+        if (data.homePP && ppVisible)
         {
             int ppW = miniTextWidth("PP");
             int ppX = homeLogoX + ((hasHome ? homeLogo.width : 20) - ppW) / 2;

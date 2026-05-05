@@ -29,6 +29,11 @@ namespace {
 
     void clearSnapshot(GameSnapshot& snap) {
         snap.gameId = 0;
+        snap.gameType = 0;
+        copyStr(snap.seriesTopSeedAbbrev, sizeof(snap.seriesTopSeedAbbrev), "");
+        snap.seriesTopSeedWins = 0;
+        copyStr(snap.seriesBottomSeedAbbrev, sizeof(snap.seriesBottomSeedAbbrev), "");
+        snap.seriesBottomSeedWins = 0;
         copyStr(snap.gameState, sizeof(snap.gameState), "");
         copyStr(snap.startTimeUtc, sizeof(snap.startTimeUtc), "");
         copyStr(snap.utcOffset, sizeof(snap.utcOffset), "");
@@ -99,6 +104,14 @@ void dataModelUpdateFromScheduleGame(JsonObjectConst game) {
         xSemaphoreGive(dataModelMutex);
         return;
     }
+    current.gameType = game["gameType"] | current.gameType;
+    JsonObjectConst series = game["seriesStatus"];
+    if (!series.isNull()) {
+        copyStr(current.seriesTopSeedAbbrev, sizeof(current.seriesTopSeedAbbrev), series["topSeedTeamAbbrev"] | "");
+        current.seriesTopSeedWins = series["topSeedWins"] | 0;
+        copyStr(current.seriesBottomSeedAbbrev, sizeof(current.seriesBottomSeedAbbrev), series["bottomSeedTeamAbbrev"] | "");
+        current.seriesBottomSeedWins = series["bottomSeedWins"] | 0;
+    }
     copyStr(current.gameState, sizeof(current.gameState), game["gameState"] | "");
 
     JsonObjectConst away = game["away"];
@@ -123,6 +136,11 @@ void dataModelUpdateFromScheduleGame(JsonObjectConst game) {
 }
 
 void dataModelUpdateFromPbp(uint32_t gameId,
+    uint8_t gameType,
+    const char* seriesTopSeedAbbrev,
+    uint8_t seriesTopSeedWins,
+    const char* seriesBottomSeedAbbrev,
+    uint8_t seriesBottomSeedWins,
     const char* gameState,
     const char* startTimeUtc,
     const char* utcOffset,
@@ -159,6 +177,11 @@ void dataModelUpdateFromPbp(uint32_t gameId,
         xSemaphoreGive(dataModelMutex);
         return;
     }
+    current.gameType = gameType;
+    copyStr(current.seriesTopSeedAbbrev, sizeof(current.seriesTopSeedAbbrev), seriesTopSeedAbbrev);
+    current.seriesTopSeedWins = seriesTopSeedWins;
+    copyStr(current.seriesBottomSeedAbbrev, sizeof(current.seriesBottomSeedAbbrev), seriesBottomSeedAbbrev);
+    current.seriesBottomSeedWins = seriesBottomSeedWins;
     copyStr(current.gameState, sizeof(current.gameState), gameState);
     copyStr(current.startTimeUtc, sizeof(current.startTimeUtc), startTimeUtc);
     copyStr(current.utcOffset, sizeof(current.utcOffset), utcOffset);

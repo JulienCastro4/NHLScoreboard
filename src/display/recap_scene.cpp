@@ -163,16 +163,33 @@ namespace {
         return true;
     }
 
-    void formatElapsedFromRemaining(const char* timeRemaining, char* out, size_t outSize) {
+    int periodDurationSeconds(uint8_t period, uint8_t gameType) {
+        // gameType: 2=regular season, 3=playoffs
+        if (period <= 3) return 20 * 60;
+        if (gameType == 3) return 20 * 60; // playoffs OT periods
+        if (period == 4) return 5 * 60;    // regular season OT
+        return -1;                         // regular season SO has no clock duration
+    }
+
+    void formatElapsedFromRemaining(const char* timeRemaining, uint8_t period, uint8_t gameType, char* out, size_t outSize) {
         if (!out || outSize == 0) return;
         out[0] = '\0';
+
+        const int periodDuration = periodDurationSeconds(period, gameType);
+        if (periodDuration <= 0) {
+            // Shootout has no meaningful elapsed clock for individual goals.
+            return;
+        }
+
         int remaining = 0;
         if (!parseTimeRemaining(timeRemaining, remaining)) {
             strncpy(out, "??:??", outSize - 1);
             out[outSize - 1] = '\0';
             return;
         }
-        int elapsed = 20 * 60 - remaining;
+
+        if (remaining > periodDuration) remaining = periodDuration;
+        int elapsed = periodDuration - remaining;
         if (elapsed < 0) elapsed = 0;
         int mm = elapsed / 60;
         int ss = elapsed % 60;
@@ -359,7 +376,16 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             display.print(scoreLine);
 
             if (data.period > 3) {
-                const char* extra = (data.period >= 5) ? "SO" : "OT";
+                char extra[8];
+                if (data.gameType == 3) {
+                    if (data.period == 4) {
+                        snprintf(extra, sizeof(extra), "OT");
+                    } else {
+                        snprintf(extra, sizeof(extra), "OT%u", (unsigned)(data.period - 3));
+                    }
+                } else {
+                    snprintf(extra, sizeof(extra), "%s", (data.period >= 5) ? "SO" : "OT");
+                }
                 int extraW = miniTextWidth(extra);
                 int extraX = (w - extraW) / 2 + xOffset;
                 drawMiniText(display, extraX, 18, extra, display.color565(180, 200, 255));
@@ -422,9 +448,23 @@ void RecapScene::render(MatrixPanel_I2S_DMA& display, const GameSnapshot& data, 
             clampLine(a2, a2Clamped, sizeof(a2Clamped));
 
             char elapsedLine[8];
-            formatElapsedFromRemaining(goal.timeRemaining, elapsedLine, sizeof(elapsedLine));
+            formatElapsedFromRemaining(goal.timeRemaining, goal.period, data.gameType, elapsedLine, sizeof(elapsedLine));
+            char periodLabel[8];
+            if (goal.period <= 3) {
+                snprintf(periodLabel, sizeof(periodLabel), "P%u", (unsigned)goal.period);
+            } else if (goal.period == 4) {
+                snprintf(periodLabel, sizeof(periodLabel), "OT");
+            } else if (data.gameType == 3) {
+                snprintf(periodLabel, sizeof(periodLabel), "OT%u", (unsigned)(goal.period - 3));
+            } else {
+                snprintf(periodLabel, sizeof(periodLabel), "SO");
+            }
             char timeLine[16];
-            snprintf(timeLine, sizeof(timeLine), "P%u %s", (unsigned)goal.period, elapsedLine);
+            if (elapsedLine[0]) {
+                snprintf(timeLine, sizeof(timeLine), "%s %s", periodLabel, elapsedLine);
+            } else {
+                snprintf(timeLine, sizeof(timeLine), "%s", periodLabel);
+            }
             char timeClamped[16];
             clampLine(timeLine, timeClamped, sizeof(timeClamped));
 

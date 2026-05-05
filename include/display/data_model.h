@@ -39,6 +39,11 @@ struct GoalQueueEntry {
 
 struct GameSnapshot {
     uint32_t gameId;
+    uint8_t gameType;
+    char seriesTopSeedAbbrev[4];
+    uint8_t seriesTopSeedWins;
+    char seriesBottomSeedAbbrev[4];
+    uint8_t seriesBottomSeedWins;
     char gameState[8];
     char startTimeUtc[24];
     char utcOffset[8];
@@ -67,6 +72,11 @@ void dataModelInit();
 void dataModelSetSelectedGame(uint32_t gameId);
 void dataModelUpdateFromScheduleGame(JsonObjectConst game);
 void dataModelUpdateFromPbp(uint32_t gameId,
+    uint8_t gameType,
+    const char* seriesTopSeedAbbrev,
+    uint8_t seriesTopSeedWins,
+    const char* seriesBottomSeedAbbrev,
+    uint8_t seriesBottomSeedWins,
     const char* gameState,
     const char* startTimeUtc,
     const char* utcOffset,

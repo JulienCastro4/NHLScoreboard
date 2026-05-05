@@ -32,6 +32,7 @@ namespace {
     bool goalAnimActive = false;
     uint32_t goalAnimStartMs = 0;
     uint32_t lastGameId = 0;
+    bool lastHadSeriesData = false;
 
     enum class RecapMode {
         Standard,
@@ -196,6 +197,20 @@ void displayTick() {
     const bool finalState = isFinalState(snapshot.gameState);
     const bool recapAvailable = snapshot.recapReady;
     if (finalState && recapAvailable) {
+        // For playoff finals, don't start countdown until series data is available
+        const bool isPlayoffFinal = (snapshot.gameType == 3);
+        const bool hasSeriesData = snapshot.seriesTopSeedAbbrev[0] && snapshot.seriesBottomSeedAbbrev[0];
+
+        if (isPlayoffFinal && !hasSeriesData) {
+            // Keep resetting timer while waiting for series data
+            recapModeStartMs = now;
+            lastHadSeriesData = false;
+        } else if (isPlayoffFinal && hasSeriesData && !lastHadSeriesData) {
+            // Series data just arrived, reset timer so full 20s starts now
+            recapModeStartMs = now;
+            lastHadSeriesData = true;
+        }
+
         if (recapMode == RecapMode::Standard) {
             if (now - recapModeStartMs >= STANDARD_MS) {
                 recapMode = RecapMode::Recap;
@@ -209,6 +224,7 @@ void displayTick() {
             if (recapScene.isComplete(now)) {
                 recapMode = RecapMode::Standard;
                 recapModeStartMs = now;
+                scene.resetFinalPhase();
             }
             return;
         }
@@ -217,6 +233,7 @@ void displayTick() {
         return;
     }
 
+    lastHadSeriesData = false;
     recapMode = RecapMode::Standard;
     recapModeStartMs = now;
     scene.render(*matrix, snapshot, now);
