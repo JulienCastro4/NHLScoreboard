@@ -157,13 +157,9 @@ void displayTick() {
         recapModeStartMs = now;
         logoCacheClear();
     }
+    // Clear legacy goalIsNew flag without triggering animation (queue handles it)
     if (snapshot.goalIsNew) {
-        char key[64];
-        buildGoalKey(snapshot, key, sizeof(key));
-        if (strcmp(key, lastGoalKey) != 0) {
-            startGoalAnim(snapshot, now);
-            dataModelClearGoalFlag();
-        }
+        dataModelClearGoalFlag();
     }
     // Check goal queue for pending animations
     if (!goalAnimActive) {
