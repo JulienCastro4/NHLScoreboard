@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Goal Log</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      padding: 1.5rem;
+      min-height: 100vh;
+    }
+    h1 { color: #4fc3f7; font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .btn {
+      background: #333;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 6px;
+      padding: 0.4rem 0.8rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .btn:hover { background: #444; }
+    .btn-refresh { background: #2a4a5a; color: #4fc3f7; border-color: #4fc3f7; }
+    #info { color: #9aa; margin-bottom: 0.8rem; font-size: 0.95rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+    th, td { border: 1px solid #2a2a4e; padding: 6px 10px; text-align: left; }
+    th { background: #22233a; color: #a5a5c5; font-weight: 600; }
+    tr:nth-child(even) { background: #1e1e36; }
+    .queued { color: #66bb6a; font-weight: 600; }
+    .anim_start { color: #ffa726; font-weight: 600; }
+    .anim_end { color: #ab47bc; font-weight: 600; }
+    .dup_skipped { color: #ef5350; font-weight: 600; }
+    .detected { color: #4fc3f7; font-weight: 600; }
+    .empty { color: #666; text-align: center; padding: 2rem; font-style: italic; }
+    @media (max-width: 600px) {
+      body { padding: 0.75rem; }
+      table { font-size: 0.8rem; }
+      th, td { padding: 4px 6px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <a href="/" class="btn">&larr; Back</a>
+    <h1>Goal Event Log</h1>
+    <button class="btn btn-refresh" onclick="refresh()">Refresh</button>
+  </div>
+  <p id="info">Loading...</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Type</th>
+        <th>Event ID</th>
+        <th>Scorer</th>
+        <th>Period</th>
+      </tr>
+    </thead>
+    <tbody id="log"></tbody>
+  </table>
+
+  <script>
+    function fmt(ms) {
+      let s = Math.floor(ms / 1000);
+      let m = Math.floor(s / 60); s %= 60;
+      let h = Math.floor(m / 60); m %= 60;
+      return h + 'h' + String(m).padStart(2, '0') + 'm' + String(s).padStart(2, '0') + 's';
+    }
+
+    function refresh() {
+      fetch('/api/goal-log')
+        .then(r => r.json())
+        .then(d => {
+          document.getElementById('info').textContent =
+            'Game ID: ' + d.gameId + ' | Total entries: ' + d.count;
+          const log = document.getElementById('log');
+          if (d.count === 0) {
+            log.innerHTML = '<tr><td colspan="5" class="empty">No goal events yet</td></tr>';
+            return;
+          }
+          let h = '';
+          d.entries.slice().reverse().forEach(e => {
+            h += '<tr><td>' + fmt(e.ms) + '</td><td class="' + e.type + '">'
+              + e.type.replace('_', ' ') + '</td><td>'
+              + e.eventId + '</td><td>' + e.scorer + '</td><td>P' + e.period + '</td></tr>';
+          });
+          log.innerHTML = h;
+        })
+        .catch(() => {
+          document.getElementById('info').textContent = 'Error fetching logs';
+        });
+    }
+
+    refresh();
+    setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

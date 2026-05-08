@@ -8,6 +8,7 @@
 #include "display/logo_cache.h"
 #include "display/recap_scene.h"
 #include "display/scoreboard_scene.h"
+#include "goal_log.h"
 
 #include <strings.h>
 
@@ -67,6 +68,7 @@ namespace {
         if (elapsed > 17000) {
             goalAnimActive = false;
             previewActive = false;
+            goalLogAdd(GoalLogType::AnimEnd, goalAnimSnapshot.gameId, goalAnimSnapshot.goalEventId, goalAnimSnapshot.goalScorer, goalAnimSnapshot.goalPeriod);
             return;
         }
         const GameSnapshot& frameSnap = previewActive ? previewSnapshot : goalAnimSnapshot;
@@ -181,6 +183,7 @@ void displayTick() {
             lastGoalKey[sizeof(lastGoalKey) - 1] = '\0';
             goalAnimActive = true;
             goalAnimStartMs = now;
+            goalLogAdd(GoalLogType::AnimStart, snapshot.gameId, entry.eventId, entry.scorer, entry.period);
             Serial.printf("[display] goal anim start: scorer='%s' eventId=%u (queue remaining=%u)\n",
                 entry.scorer, (unsigned)entry.eventId, (unsigned)dataModelGoalQueueSize());
         }

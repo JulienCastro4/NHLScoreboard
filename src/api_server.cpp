@@ -9,6 +9,7 @@
 #include "playbyplay_service.h"
 #include "display/data_model.h"
 #include "display/display_manager.h"
+#include "goal_log.h"
 static WebServer server(80);
 static uint32_t selectedGameId = 0;
 static const char* CONFIG_PATH = "/scoreboard.json";
@@ -52,8 +53,19 @@ static void serveFile(const char* path, const char* contentType) {
         server.send(500, "text/plain", "Erreur lecture");
         return;
     }
-    server.streamFile(f, contentType);
+    size_t sz = f.size();
+    char* buf = (char*)malloc(sz + 1);
+    if (!buf) {
+        f.close();
+        server.send(500, "text/plain", "OOM");
+        return;
+    }
+    f.readBytes(buf, sz);
+    buf[sz] = '\0';
     f.close();
+    server.sendHeader("Connection", "close");
+    server.send(200, contentType, buf);
+    free(buf);
 }
 
 static void handleRoot() {
@@ -132,12 +144,49 @@ static void handleApiPreviewGoal() {
     }
     server.send(200, "application/json", "{}");
 }
+
+static void handleApiGoalLog() {
+    size_t count = goalLogCount();
+    // Build minimal JSON manually to avoid large JsonDocument allocation
+    String resp;
+    resp.reserve(count * 80 + 64);
+    resp += "{\"gameId\":";
+    resp += String(selectedGameId);
+    resp += ",\"count\":";
+    resp += String((unsigned)count);
+    resp += ",\"entries\":[";
+    for (size_t i = 0; i < count; ++i) {
+        const GoalLogEntry& e = goalLogGet(i);
+        if (i > 0) resp += ',';
+        const char* typeStr = "?";
+        switch (e.type) {
+            case GoalLogType::Detected: typeStr = "detected"; break;
+            case GoalLogType::Queued: typeStr = "queued"; break;
+            case GoalLogType::AnimStart: typeStr = "anim_start"; break;
+            case GoalLogType::AnimEnd: typeStr = "anim_end"; break;
+            case GoalLogType::DupSkipped: typeStr = "dup_skipped"; break;
+        }
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+            "{\"ms\":%lu,\"eventId\":%u,\"gameId\":%u,\"period\":%u,\"type\":\"%s\",\"scorer\":\"%s\"}",
+            (unsigned long)e.timestampMs, (unsigned)e.eventId, (unsigned)e.gameId,
+            (unsigned)e.period, typeStr, e.scorer);
+        resp += buf;
+    }
+    resp += "]}";
+    server.send(200, "application/json", resp);
+}
+
+static void handleGoalLogPage() {
+    serveFile("/goal-log.html", "text/html");
+}
 uint32_t apiServerGetSelectedGameId() {
     return selectedGameId;
 }
 
 void apiServerInit() {
     dataModelInit();
+    goalLogInit();
     selectedGameId = 0;
     saveSelectedGameId(0);
     dataModelSetSelectedGame(0);
@@ -149,6 +198,8 @@ void apiServerInit() {
     server.on("/api/selected-game", HTTP_GET, handleApiSelectedGame);
     server.on("/api/display-power", HTTP_ANY, handleApiDisplayPower);
     server.on("/api/preview-goal", HTTP_POST, handleApiPreviewGoal);
+    server.on("/api/goal-log", HTTP_GET, handleApiGoalLog);
+    server.on("/goal-log", HTTP_GET, handleGoalLogPage);
     server.onNotFound([]() {
         server.send(404, "text/plain", "404");
     });

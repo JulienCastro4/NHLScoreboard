@@ -12,6 +12,7 @@
 #include "api_server.h"
 #include "display/data_model.h"
 #include "prefix_stream.h"
+#include "goal_log.h"
 
 // ============================================================================
 // CONSTANTS
@@ -56,6 +57,9 @@ struct PbpState {
     int lastPlaySortOrder;
     bool primed;
     bool hadEmptyFetch;
+    // Track seen goal eventIds to prevent double-queueing
+    uint32_t seenGoalIds[32];
+    uint8_t seenGoalCount;
 };
 
 struct RosterCache {
@@ -339,6 +343,16 @@ static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
     if (!state.primed) {
         state.lastPlaySortOrder = lastSortOrder;
         state.primed = true;
+        // Mark all existing goals as seen so they don't replay
+        for (JsonObject play : plays) {
+            const char* type = play["typeDescKey"] | "";
+            if (String(type).equalsIgnoreCase("goal")) {
+                uint32_t eid = play["eventId"] | 0;
+                if (eid && state.seenGoalCount < 32) {
+                    state.seenGoalIds[state.seenGoalCount++] = eid;
+                }
+            }
+        }
         return;
     }
     
@@ -354,6 +368,27 @@ static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
         
         const char* type = play["typeDescKey"] | "";
         if (String(type).equalsIgnoreCase("goal")) {
+            uint32_t eid = play["eventId"] | 0;
+            
+            // Dedup: skip if we've already queued this eventId
+            bool alreadySeen = false;
+            for (uint8_t i = 0; i < state.seenGoalCount; ++i) {
+                if (state.seenGoalIds[i] == eid) {
+                    alreadySeen = true;
+                    break;
+                }
+            }
+            if (alreadySeen) {
+                Serial.printf("[pbp] GOAL skip dup eventId=%u\n", (unsigned)eid);
+                goalLogAdd(GoalLogType::DupSkipped, state.gameId, eid, "", 0);
+                continue;
+            }
+            
+            // Record this eventId as seen
+            if (state.seenGoalCount < 32) {
+                state.seenGoalIds[state.seenGoalCount++] = eid;
+            }
+            
             GoalInfo g = {};
             parseGoalEvent(play, g);
             // Push each goal to the queue
@@ -366,6 +401,7 @@ static void detectNewGoals(JsonArray plays, GoalInfo& goal) {
             strncpy(entry.time, g.time.c_str(), sizeof(entry.time) - 1);
             entry.period = (uint8_t)g.period;
             dataModelPushGoal(entry);
+            goalLogAdd(GoalLogType::Queued, state.gameId, entry.eventId, entry.scorer, entry.period);
             Serial.printf("[pbp] GOAL queued: scorer='%s' a1='%s' a2='%s' eventId=%d\n",
                 entry.scorer, entry.assist1, entry.assist2, g.eventId);
             // Keep track of last goal for the legacy single-goal field
@@ -788,6 +824,7 @@ static void playByPlayPollTask(void*) {
             state.lastPlaySortOrder = -1;
             state.primed = false;
             state.hadEmptyFetch = false;
+            state.seenGoalCount = 0;
             rosterCache.clear();
             seriesCache.clear();
             
